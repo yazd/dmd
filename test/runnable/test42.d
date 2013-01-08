@@ -5454,6 +5454,72 @@ void test9248()
 
 /***************************************************/
 
+ulong d2ulong(double u)
+{
+    return cast(ulong)u;
+}
+
+void testdbl_to_ulong()
+{
+    auto u = d2ulong(12345.6);
+    //writeln(u);
+    assert(u == 12345);
+
+    real adjust = 1.0L/real.epsilon;
+    u = d2ulong(adjust);
+    //writefln("%s %s", adjust, u);
+    assert(u == 9223372036854775808UL);
+
+    auto v = d2ulong(adjust * 1.1);
+    //writefln("%s %s %s", adjust, v, u + u/10);
+
+    // The following can vary in the last bits with different optimization settings,
+    // i.e. the conversion from real to double may not happen.
+    //assert(v == 10145709240540254208UL);
+}
+
+/***************************************************/
+
+
+
+uint d2uint(double u)
+{
+    return cast(uint)u;
+}
+
+void testdbl_to_uint()
+{
+    auto u = d2uint(12345.6);
+    //writeln(u);
+    assert(u == 12345);
+}
+
+/***************************************************/
+
+ulong r2ulong(real u)
+{
+    return cast(ulong)u;
+}
+
+void testreal_to_ulong()
+{
+    auto u = r2ulong(12345.6L);
+    //writeln(u);
+    assert(u == 12345);
+
+    real adjust = 1.0L/real.epsilon;
+    u = r2ulong(adjust);
+    //writefln("%s %s", adjust, u);
+    assert(u == 9223372036854775808UL);
+
+    auto v = r2ulong(adjust * 1.1);
+    writefln("%s %s %s", adjust, v, u + u/10);
+
+    //assert(v == 10145709240540253389UL);
+}
+
+/***************************************************/
+
 int main()
 {
     test1();
@@ -5726,6 +5792,9 @@ int main()
     test8796();
     test9171();
     test9248();
+    testdbl_to_ulong();
+    testdbl_to_uint();
+    testreal_to_ulong();
 
     writefln("Success");
     return 0;

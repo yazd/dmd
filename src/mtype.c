@@ -1650,7 +1650,7 @@ Type *Type::merge()
     if (ty == Tinstance) return this;
     if (ty == Taarray && !((TypeAArray *)this)->index->merge()->deco)
         return this;
-    if (nextOf() && !nextOf()->merge()->deco)
+    if (nextOf() && !nextOf()->deco)
         return this;
 
     //printf("merge(%s)\n", toChars());
@@ -3976,7 +3976,9 @@ Expression *TypeSArray::dotExp(Scope *sc, Expression *e, Identifier *ident)
 #endif
     if (ident == Id::length)
     {
-        e = dim;
+        Loc oldLoc = e->loc;
+        e = dim->copy();
+        e->loc = oldLoc;
     }
     else if (ident == Id::ptr)
     {

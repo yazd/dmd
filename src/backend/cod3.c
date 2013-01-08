@@ -349,6 +349,12 @@ void cod3_set32()
 
     for (unsigned i = 0x80; i < 0x90; i++)
         inssize2[i] = W|T|6;
+
+#if TARGET_OSX
+    STACKALIGN = 16;   // 16 for OSX because OSX uses SIMD
+#else
+    STACKALIGN = 4;
+#endif
 }
 
 /********************************
@@ -378,6 +384,8 @@ void cod3_set64()
 
     for (unsigned i = 0x80; i < 0x90; i++)
         inssize2[i] = W|T|6;
+
+    STACKALIGN = 16;   // 16 rather than 8 because of SIMD alignment
 }
 
 /*********************************
@@ -1831,7 +1839,7 @@ regm_t cod3_useBP()
         goto Lcant;
 
     stackoffsets(0);
-    localsize = Aoffset + FASToffset;                // an estimate only
+    localsize = Auto.offset + Fast.offset;                // an estimate only
 //    if (localsize)
     {
         if (!(config.flags4 & CFG4speed) ||
@@ -2809,7 +2817,7 @@ code* prolog_setupalloca()
     // Set up magic parameter for alloca()
     // MOV -REGSIZE[BP],localsize - BPoff
     code* c = genc(NULL,0xC7,modregrm(2,0,BPRM),
-            FLconst,AAoff + BPoff,
+            FLconst,AllocaOff + BPoff,
             FLconst,localsize - BPoff);
     if (I64)
         code_orrex(c, REX_W);
@@ -2935,7 +2943,7 @@ code* prolog_genvarargs(symbol* sv, regm_t* namedargs)
         SUB     RAX,6*8+0x7F                // point to start of __va_argsave
         MOV     6*8+8*16+4+4+8[RAX],RAX     // set __va_argsave.reg_args
     */
-    targ_size_t voff = Aoff + BPoff + sv->Soffset;  // EBP offset of start of sv
+    targ_size_t voff = Auto.size + BPoff + sv->Soffset;  // EBP offset of start of sv
     const int vregnum = 6;
     const unsigned vsize = vregnum * 8 + 8 * 16;
     code *c = NULL;
@@ -3090,7 +3098,7 @@ code* prolog_loadparams(tym_t tyf, bool pushalloc, regm_t* namedargs)
             }
             else
             {
-                targ_size_t offset = FASToff + BPoff;
+                targ_size_t offset = Fast.size + BPoff;
                 if (s->Sclass == SCshadowreg)
                     offset = Poff;
                 offset += s->Soffset;
@@ -3117,8 +3125,8 @@ code* prolog_loadparams(tym_t tyf, bool pushalloc, regm_t* namedargs)
                             }
                             else
                             {
-                                //printf("%s FASToff = %d, BPoff = %d, Soffset = %d, sz = %d\n",
-                                //         s->Sident, (int)FASToff, (int)BPoff, (int)s->Soffset, (int)sz);
+                                //printf("%s Fast.size = %d, BPoff = %d, Soffset = %d, sz = %d\n",
+                                //         s->Sident, (int)Fast.size, (int)BPoff, (int)s->Soffset, (int)sz);
                                 if (I64 && sz >= 8)
                                     code_orrex(c2, REX_W);
                             }
@@ -4068,18 +4076,18 @@ if (0 && !(funcsym_p->Sfunc->Fflags3 & Fmember))
 }
                 break;
             case SCfastpar:
-//printf("\tfastpar %s %p Soffset %x FASToff %x BPoff %x\n", s->Sident, s, (int)s->Soffset, (int)FASToff, (int)BPoff);
-                s->Soffset += FASToff + BPoff;
+//printf("\tfastpar %s %p Soffset %x Fast.size %x BPoff %x\n", s->Sident, s, (int)s->Soffset, (int)Fast.size, (int)BPoff);
+                s->Soffset += Fast.size + BPoff;
                 break;
             case SCauto:
             case SCregister:
             case_auto:
                 if (s->Sfl == FLfast)
-                    s->Soffset += FASToff + BPoff;
+                    s->Soffset += Fast.size + BPoff;
                 else
-//printf("s = '%s', Soffset = x%x, Aoff = x%x, BPoff = x%x EBPtoESP = x%x\n", s->Sident, (int)s->Soffset, (int)Aoff, (int)BPoff, (int)EBPtoESP);
+//printf("s = '%s', Soffset = x%x, Auto.size = x%x, BPoff = x%x EBPtoESP = x%x\n", s->Sident, (int)s->Soffset, (int)Auto.size, (int)BPoff, (int)EBPtoESP);
 //              if (!(funcsym_p->Sfunc->Fflags3 & Fnested))
-                    s->Soffset += Aoff + BPoff;
+                    s->Soffset += Auto.size + BPoff;
                 break;
             case SCbprel:
                 break;
@@ -4249,11 +4257,11 @@ void assignaddrc(code *c)
                 break;
 
             case FLfast:
-                soff = FASToff;
+                soff = Fast.size;
                 goto L1;
             case FLreg:
             case FLauto:
-                soff = Aoff;
+                soff = Auto.size;
             L1:
                 if (s->Sflags & SFLunambig && !(s->Sflags & SFLread) && // if never loaded
                     !anyiasm &&
@@ -4311,15 +4319,12 @@ void assignaddrc(code *c)
             case FLpara:
                 soff = Poff - BPoff;    // cancel out add of BPoff
                 goto L1;
-            case FLtmp:
-                soff = Toff;
-                goto L1;
             case FLfltreg:
                 c->IEVpointer1 += Foff + BPoff;
                 c->Iflags |= CFunambig;
                 goto L2;
             case FLallocatmp:
-                c->IEVpointer1 += AAoff + BPoff;
+                c->IEVpointer1 += AllocaOff + BPoff;
                 goto L2;
             case FLbprel:
                 c->IEVpointer1 += s->Soffset;
@@ -4404,22 +4409,19 @@ void assignaddrc(code *c)
                 assert(0);
                 /* NOTREACHED */
             case FLfast:
-                c->IEVpointer2 += s->Soffset + FASToff + BPoff;
+                c->IEVpointer2 += s->Soffset + Fast.size + BPoff;
                 break;
             case FLauto:
-                c->IEVpointer2 += s->Soffset + Aoff + BPoff;
+                c->IEVpointer2 += s->Soffset + Auto.size + BPoff;
                 break;
             case FLpara:
                 c->IEVpointer2 += s->Soffset + Poff;
-                break;
-            case FLtmp:
-                c->IEVpointer2 += s->Soffset + Toff + BPoff;
                 break;
             case FLfltreg:
                 c->IEVpointer2 += Foff + BPoff;
                 break;
             case FLallocatmp:
-                c->IEVpointer2 += AAoff + BPoff;
+                c->IEVpointer2 += AllocaOff + BPoff;
                 break;
             case FLbprel:
                 c->IEVpointer2 += s->Soffset;
@@ -4466,13 +4468,10 @@ targ_size_t cod3_bpoffset(symbol *s)
             offset += Poff;
             break;
         case FLfast:
-            offset += FASToff + BPoff;
+            offset += Fast.size + BPoff;
             break;
         case FLauto:
-            offset += Aoff + BPoff;
-            break;
-        case FLtmp:
-            offset += Toff + BPoff;
+            offset += Auto.size + BPoff;
             break;
         default:
 #ifdef DEBUG
@@ -6331,7 +6330,6 @@ void code_hydrate(code **pc)
             case FLfunc:
             case FLpseudo:
             case FLextern:
-            case FLtmp:
                 assert(flinsymtab[fl]);
                 symbol_hydrate(&c->IEVsym1);
                 symbol_debug(c->IEVsym1);
@@ -6393,7 +6391,6 @@ void code_hydrate(code **pc)
             case FLfunc:
             case FLpseudo:
             case FLextern:
-            case FLtmp:
                 assert(flinsymtab[fl]);
                 symbol_hydrate(&c->IEVsym2);
                 symbol_debug(c->IEVsym2);
@@ -6508,7 +6505,6 @@ void code_dehydrate(code **pc)
             case FLfunc:
             case FLpseudo:
             case FLextern:
-            case FLtmp:
                 assert(flinsymtab[fl]);
                 symbol_dehydrate(&c->IEVsym1);
                 break;
@@ -6569,7 +6565,6 @@ void code_dehydrate(code **pc)
             case FLfunc:
             case FLpseudo:
             case FLextern:
-            case FLtmp:
                 assert(flinsymtab[fl]);
                 symbol_dehydrate(&c->IEVsym2);
                 break;
@@ -6717,7 +6712,6 @@ void code::print()
                 case FLdata:
                 case FLudata:
                 case FLpara:
-                case FLtmp:
                 case FLbprel:
                 case FLtlsdata:
                     printf(" sym='%s'",c->IEVsym1->Sident);
@@ -6754,7 +6748,6 @@ void code::print()
             case FLfast:
             case FLreg:
             case FLpara:
-            case FLtmp:
             case FLbprel:
             case FLfunc:
             case FLdata:

@@ -2606,6 +2606,8 @@ code *cdcnvt(elem *e, regm_t *pretregs)
             case OPd_u32:               // use subroutine, not 8087
                 if (I64 && config.fpxmmregs)
                     return xmmcnvt(e,pretregs);
+                if (I32 || I64)
+                    return cdd_u32(e,pretregs);
 #if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
                 retregs = mST0;
 #else
@@ -2614,6 +2616,8 @@ code *cdcnvt(elem *e, regm_t *pretregs)
                 goto L1;
 
             case OPd_u64:
+                if (I32 || I64)
+                    return cdd_u64(e,pretregs);
                 retregs = DOUBLEREGS;
                 goto L1;
             case OPu64_d:
@@ -2626,6 +2630,8 @@ code *cdcnvt(elem *e, regm_t *pretregs)
                 }
                 break;
             case OPld_u64:
+                if (I32 || I64)
+                    return cdd_u64(e,pretregs);
                 retregs = mST0;
                 c1 = codelem(e->E1,&retregs,FALSE);
                 c2 = callclib(e,CLIBld_u64,pretregs,0);

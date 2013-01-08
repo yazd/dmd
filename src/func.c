@@ -631,9 +631,15 @@ void FuncDeclaration::semantic(Scope *sc)
 
         if (!doesoverride && isOverride())
         {
-            Dsymbol *s = cd->search_correct(ident);
+            Dsymbol *s = NULL;
+            for (size_t i = 0; i < cd->baseclasses->dim; i++)
+            {
+                s = (*cd->baseclasses)[i]->base->search_correct(ident);
+                if (s) break;
+            }
+
             if (s)
-                error("does not override any function, did you mean '%s'", s->toPrettyChars());
+                error("does not override any function, did you mean to override '%s'?", s->toPrettyChars());
             else
                 error("does not override any function");
         }
@@ -2456,6 +2462,28 @@ void overloadResolveX(Match *m, FuncDeclaration *fstart,
     overloadApply(fstart, &fp2, &p);
 }
 
+static void MODMatchToBuffer(OutBuffer *buf, unsigned char lhsMod, unsigned char rhsMod)
+{
+    bool bothMutable = ((lhsMod & rhsMod) == 0);
+    bool sharedMismatch = ((lhsMod ^ rhsMod) & MODshared);
+    bool sharedMismatchOnly = ((lhsMod ^ rhsMod) == MODshared);
+
+    if (lhsMod & MODshared)
+        buf->writestring("shared ");
+    else if (sharedMismatch && !(lhsMod & MODimmutable))
+        buf->writestring("non-shared ");
+
+    if (bothMutable && sharedMismatchOnly)
+    { }
+    else if (lhsMod & MODimmutable)
+        buf->writestring("immutable ");
+    else if (lhsMod & MODconst)
+        buf->writestring("const ");
+    else if (lhsMod & MODwild)
+        buf->writestring("inout ");
+    else
+        buf->writestring("mutable ");
+}
 
 FuncDeclaration *FuncDeclaration::overloadResolve(Loc loc, Expression *ethis, Expressions *arguments, int flags)
 {
@@ -2506,15 +2534,26 @@ if (arguments)
                 return NULL;            // no match
 
             tf = (TypeFunction *)type;
+            if (ethis && !MODimplicitConv(ethis->type->mod, tf->mod)) // modifier mismatch
+            {
+                OutBuffer thisBuf, funcBuf;
+                MODMatchToBuffer(&thisBuf, ethis->type->mod, tf->mod);
+                MODMatchToBuffer(&funcBuf, tf->mod, ethis->type->mod);
+                ::error(loc, "%smethod %s is not callable using a %sobject",
+                    funcBuf.toChars(), this->toPrettyChars(), thisBuf.toChars());
+            }
+            else
+            {
+                OutBuffer buf2;
+                tf->modToBuffer(&buf2);
 
-            OutBuffer buf2;
-            tf->modToBuffer(&buf2);
+                //printf("tf = %s, args = %s\n", tf->deco, (*arguments)[0]->type->deco);
+                error(loc, "%s%s is not callable using argument types %s",
+                    Parameter::argsTypesToChars(tf->parameters, tf->varargs),
+                    buf2.toChars(),
+                    buf.toChars());
+            }
 
-            //printf("tf = %s, args = %s\n", tf->deco, (*arguments)[0]->type->deco);
-            error(loc, "%s%s is not callable using argument types %s",
-                Parameter::argsTypesToChars(tf->parameters, tf->varargs),
-                buf2.toChars(),
-                buf.toChars());
             return m.anyf;              // as long as it's not a FuncAliasDeclaration
         }
         else
