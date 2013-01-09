@@ -5,8 +5,7 @@
 // Written by Walter Bright
 /*
  * This source file is made available for personal use
- * only. The license is in /dmd/src/dmd/backendlicense.txt
- * or /dm/src/dmd/backendlicense.txt
+ * only. The license is in backendlicense.txt
  * For any other uses, please contact Digital Mars.
  */
 
@@ -284,10 +283,10 @@ void genEEcode()
     eecontext.EEin++;
     regcon.immed.mval = 0;
     retregs = 0;    //regmask(eecontext.EEelem->Ety);
-    assert(EEoffset >= REGSIZE);
-    c = cod3_stackadj(NULL, EEoffset - REGSIZE);
+    assert(EEStack.offset >= REGSIZE);
+    c = cod3_stackadj(NULL, EEStack.offset - REGSIZE);
     gen1(c,0x50 + SI);                      // PUSH ESI
-    genadjesp(c,EEoffset);
+    genadjesp(c,EEStack.offset);
     c = gencodelem(c,eecontext.EEelem,&retregs, FALSE);
     assignaddrc(c);
     pinholeopt(c,NULL);

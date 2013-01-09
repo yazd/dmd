@@ -1344,6 +1344,15 @@ MATCH TemplateDeclaration::deduceFunctionTemplateMatch(Scope *sc, Loc loc, Objec
                     if (m < match)
                         match = m;
 
+                    /* Remove top const for dynamic array types and pointer types
+                     */
+                    if ((tt->ty == Tarray || tt->ty == Tpointer) &&
+                        !tt->isMutable() &&
+                        (!(fparam->storageClass & STCref) ||
+                         (fparam->storageClass & STCauto) && !farg->isLvalue()))
+                    {
+                        tt = tt->mutableOf();
+                    }
                     t->objects[i] = tt;
                 }
                 declareParameter(paramscope, tp, t);
@@ -4662,7 +4671,10 @@ Dsymbol *TemplateInstance::syntaxCopy(Dsymbol *s)
 
     ti->tiargs = arraySyntaxCopy(tiargs);
 
-    ScopeDsymbol::syntaxCopy(ti);
+    if (inst)
+        tempdecl->ScopeDsymbol::syntaxCopy(ti);
+    else
+        ScopeDsymbol::syntaxCopy(ti);
     return ti;
 }
 

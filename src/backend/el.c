@@ -5,8 +5,7 @@
 // Written by Walter Bright
 /*
  * This source file is made available for personal use
- * only. The license is in /dmd/src/dmd/backendlicense.txt
- * or /dm/src/dmd/backendlicense.txt
+ * only. The license is in backendlicense.txt
  * For any other uses, please contact Digital Mars.
  */
 
@@ -1129,7 +1128,7 @@ symbol *el_alloc_localgot()
         sprintf(name, "_LOCALGOT%d", tmpnum++);
         localgot = symbol_name(name, SCauto, type_fake(TYnptr));
         symbol_add(localgot);
-        localgot->Sfl = FLauto;  // can't be FLauto yet, executables crash for unknown reasons
+        localgot->Sfl = FLauto;
         localgot->Sflags = SFLfree | SFLunambig | GTregcand;
     }
     return localgot;
