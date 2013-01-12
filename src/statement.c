@@ -3183,7 +3183,8 @@ Statement *SwitchStatement::semantic(Scope *sc)
     }
     else
     {   condition = condition->integralPromotions(sc);
-        condition->checkIntegral();
+        if (!condition->type->isintegral())
+            error("'%s' must be of integral or string type, it is a %s", condition->toChars(), condition->type->toChars());
     }
     condition = condition->optimize(WANTvalue);
 
@@ -5005,9 +5006,10 @@ Statement *ThrowStatement::semantic(Scope *sc)
 
 int ThrowStatement::blockExit(bool mustNotThrow)
 {
-    if (mustNotThrow)
+    Type *t = exp->type->toBasetype();
+    if (mustNotThrow && t->ty != Terror)
     {
-        ClassDeclaration *cd = exp->type->toBasetype()->isClassHandle();
+        ClassDeclaration *cd = t->isClassHandle();
         assert(cd);
 
         // Bugzilla 8675
