@@ -1,31 +1,25 @@
-ifeq (,$(TARGET))
-    OS:=$(shell uname)
-    OSVER:=$(shell uname -r)
-    ifeq (Darwin,$(OS))
-        TARGET=OSX
-    else
-        ifeq (Linux,$(OS))
-            TARGET=LINUX
-        else
-            ifeq (FreeBSD,$(OS))
-                TARGET=FREEBSD
-            else
-                ifeq (OpenBSD,$(OS))
-                    TARGET=OPENBSD
-                else
-                    ifeq (Solaris,$(OS))
-                        TARGET=SOLARIS
-                    else
-                        ifeq (SunOS,$(OS))
-                            TARGET=SOLARIS
-                        else
-                            $(error Unrecognized or unsupported OS for uname: $(OS))
-                        endif
-                    endif
-                endif
-            endif
-        endif
-    endif
+OS:=
+uname_S:=$(shell uname -s)
+ifeq (Darwin,$(uname_S))
+        OS:=OSX
+endif
+ifeq (Linux,$(uname_S))
+	OS:=LINUX
+endif
+ifeq (FreeBSD,$(uname_S))
+	OS:=FREEBSD
+endif
+ifeq (OpenBSD,$(uname_S))
+	OS:=OPENBSD
+endif
+ifeq (Solaris,$(uname_S))
+	OS:=SOLARIS
+endif
+ifeq (SunOS,$(uname_S))
+	OS:=SOLARIS
+endif
+ifeq (,$(OS))
+	$(error Unrecognized or unsupported OS for uname: $(uname_S))
 endif
 
 ifeq (,$(TARGET_CPU))
@@ -54,7 +48,7 @@ ifneq (x,x$(MODEL))
     MODEL_FLAG=-m$(MODEL)
 endif
 
-ifeq (OSX,$(TARGET))
+ifeq (OSX,$(OS))
     SDKDIR=/Developer/SDKs
     ifeq "$(wildcard $(SDKDIR))" ""
         SDKDIR=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
@@ -86,8 +80,8 @@ WARNINGS=-Wno-deprecated -Wstrict-aliasing
 #GFLAGS = $(WARNINGS) -D__pascal= -fno-exceptions -g -DDEBUG=1 -DUNITTEST $(COV)
 GFLAGS = $(WARNINGS) -D__pascal= -fno-exceptions -O2
 
-CFLAGS = $(GFLAGS) -I$(ROOT) -DMARS=1 -DTARGET_$(TARGET)=1 -DDM_TARGET_CPU_$(TARGET_CPU)=1
-MFLAGS = $(GFLAGS) -I$C -I$(TK) -I$(ROOT) -DMARS=1 -DTARGET_$(TARGET)=1 -DDM_TARGET_CPU_$(TARGET_CPU)=1
+CFLAGS = $(GFLAGS) -I$(ROOT) -DMARS=1 -DTARGET_$(OS)=1 -DDM_TARGET_CPU_$(TARGET_CPU)=1
+MFLAGS = $(GFLAGS) -I$C -I$(TK) -I$(ROOT) -DMARS=1 -DTARGET_$(OS)=1 -DDM_TARGET_CPU_$(TARGET_CPU)=1
 
 CH= $C/cc.h $C/global.h $C/oper.h $C/code.h $C/type.h \
 	$C/dt.h $C/cgcv.h $C/el.h $C/obj.h $(TARGET_CH)
@@ -103,19 +97,19 @@ DMD_OBJS = \
 	identifier.o impcnvtab.o import.o inifile.o init.o inline.o \
 	lexer.o link.o mangle.o mars.o rmem.o module.o msc.o mtype.o \
 	nteh.o cppmangle.o opover.o optimize.o os.o out.o outbuf.o \
-	parse.o ph.o root.o rtlsym.o s2ir.o scope.o statement.o \
+	parse.o ph2.o root.o rtlsym.o s2ir.o scope.o statement.o \
 	stringtable.o struct.o csymbol.o template.o tk.o tocsym.o todt.o \
-	type.o typinf.o util.o var.o version.o strtold.o utf.o staticassert.o \
+	type.o typinf.o util2.o var.o version.o strtold.o utf.o staticassert.o \
 	toobj.o toctype.o toelfdebug.o entity.o doc.o macro.o \
 	hdrgen.o delegatize.o aa.o ti_achar.o toir.o interpret.o traits.o \
 	builtin.o ctfeexpr.o clone.o aliasthis.o \
 	man.o arrayop.o port.o response.o async.o json.o speller.o aav.o unittests.o \
 	imphint.o argtypes.o ti_pvoid.o apply.o sideeffect.o \
 	intrange.o canthrow.o \
-	pdata.o cv8.o \
+	pdata.o cv8.o backconfig.o \
 	$(TARGET_OBJS)
 
-ifeq (OSX,$(TARGET))
+ifeq (OSX,$(OS))
     DMD_OBJS += libmach.o machobj.o
 else
     DMD_OBJS += libelf.o elfobj.o
@@ -128,8 +122,8 @@ SRC = win32.mak posix.mak \
 	aggregate.h parse.c statement.c constfold.c version.h version.c \
 	inifile.c iasm.c module.c scope.c dump.c init.h init.c attrib.h \
 	attrib.c opover.c class.c mangle.c tocsym.c func.c inline.c \
-	access.c complex_t.h irstate.h irstate.c glue.c msc.c ph.c tk.c \
-	s2ir.c todt.c e2ir.c util.c identifier.h parse.h \
+	access.c complex_t.h irstate.h irstate.c glue.c msc.c tk.c \
+	s2ir.c todt.c e2ir.c identifier.h parse.h \
 	scope.h enum.h import.h mars.h module.h mtype.h dsymbol.h \
 	declaration.h lexer.h expression.h irstate.h statement.h eh.c \
 	utf.h utf.c staticassert.h staticassert.c \
@@ -140,7 +134,7 @@ SRC = win32.mak posix.mak \
 	libmscoff.c \
 	aliasthis.h aliasthis.c json.h json.c unittests.c imphint.c \
 	argtypes.c apply.c sideeffect.c \
-	intrange.h intrange.c canthrow.c \
+	intrange.h intrange.c canthrow.c vergen.c \
 	scanmscoff.c ctfe.h ctfeexpr.c \
 	$C/cdef.h $C/cc.h $C/oper.h $C/ty.h $C/optabgen.c \
 	$C/global.h $C/code.h $C/type.h $C/dt.h $C/cgcv.h \
@@ -159,8 +153,9 @@ SRC = win32.mak posix.mak \
 	$C/dwarf.c $C/dwarf.h $C/aa.h $C/aa.c $C/tinfo.h $C/ti_achar.c \
 	$C/ti_pvoid.c $C/platform_stub.c $C/code_x86.h $C/code_stub.h \
 	$C/machobj.c $C/mscoffobj.c \
-	$C/xmm.h $C/obj.h $C/pdata.c $C/cv8.c \
+	$C/xmm.h $C/obj.h $C/pdata.c $C/cv8.c $C/backconfig.c \
 	$C/md5.c $C/md5.h \
+	$C/ph2.c $C/util2.c \
 	$(TK)/filespec.h $(TK)/mem.h $(TK)/list.h $(TK)/vec.h \
 	$(TK)/filespec.c $(TK)/mem.c $(TK)/vec.c $(TK)/list.c \
 	$(ROOT)/root.h $(ROOT)/root.c $(ROOT)/array.c \
@@ -182,7 +177,7 @@ dmd: $(DMD_OBJS)
 clean:
 	rm -f $(DMD_OBJS) dmd optab.o id.o impcnvgen idgen id.c id.h \
 	impcnvtab.c optabgen debtab.c optab.c cdxxx.c elxxx.c fltables.c \
-	tytab.c core \
+	tytab.c vergen verstr.h core \
 	*.cov *.gcda *.gcno
 
 ######## optabgen generates some source
@@ -211,6 +206,12 @@ $(impcnvtab_output) : impcnvgen
 impcnvgen : mtype.h impcnvgen.c
 	$(ENVP) $(CC) $(CFLAGS) impcnvgen.c -o impcnvgen
 	./impcnvgen
+
+######### vergen generates some source
+
+verstr.h : vergen.c ../VERSION
+	$(ENVP) $(CC) vergen.c -o vergen
+	cat ../VERSION | ./vergen > verstr.h
 
 #########
 
@@ -245,6 +246,9 @@ async.o: $(ROOT)/async.c
 
 attrib.o: attrib.c
 	$(CC) -c $(CFLAGS) $<
+
+backconfig.o: $C/backconfig.c
+	$(CC) -c $(MFLAGS) $<
 
 bcomplex.o: $C/bcomplex.c
 	$(CC) -c $(MFLAGS) $<
@@ -486,7 +490,7 @@ man.o: $(ROOT)/man.c
 mangle.o: mangle.c
 	$(CC) -c $(CFLAGS) $<
 
-mars.o: mars.c
+mars.o: mars.c verstr.h
 	$(CC) -c $(CFLAGS) $<
 
 rmem.o: $(ROOT)/rmem.c
@@ -528,7 +532,7 @@ parse.o: parse.c
 pdata.o: $C/pdata.c
 	$(CC) -c $(MFLAGS) $<
 
-ph.o: ph.c
+ph2.o: $C/ph2.c
 	$(CC) -c $(MFLAGS) $<
 
 platform_stub.o: $C/platform_stub.c
@@ -615,7 +619,7 @@ type.o: $C/type.c
 typinf.o: typinf.c $(CH) mars.h module.h mtype.h
 	$(CC) -c $(MFLAGS) -I$(ROOT) $<
 
-util.o: util.c
+util2.o: $C/util2.c
 	$(CC) -c $(MFLAGS) $<
 
 utf.o: utf.c utf.h
@@ -669,7 +673,7 @@ gcov:
 	gcov irstate.c
 	gcov json.c
 	gcov lexer.c
-ifeq (OSX,$(TARGET))
+ifeq (OSX,$(OS))
 	gcov libmach.c
 else
 	gcov libelf.c
@@ -684,7 +688,6 @@ endif
 	gcov opover.c
 	gcov optimize.c
 	gcov parse.c
-	gcov ph.c
 	gcov scope.c
 	gcov sideeffect.c
 	gcov statement.c
@@ -700,7 +703,6 @@ endif
 	gcov toelfdebug.c
 	gcov typinf.c
 	gcov utf.c
-	gcov util.c
 	gcov version.c
 	gcov intrange.c
 

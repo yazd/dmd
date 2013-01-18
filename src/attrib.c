@@ -27,9 +27,6 @@
 #include "module.h"
 #include "parse.h"
 #include "template.h"
-#if TARGET_NET
- #include "frontend.net/pragma.h"
-#endif
 
 extern bool obj_includelib(const char *name);
 void obj_startaddress(Symbol *s);
@@ -903,7 +900,9 @@ void AnonDeclaration::setFieldOffset(AggregateDeclaration *ad, unsigned *poffset
 void AnonDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 {
     buf->printf(isunion ? "union" : "struct");
-    buf->writestring("\n{\n");
+    buf->writenl();
+    buf->writestring("{");
+    buf->writenl();
     buf->level++;
     if (decl)
     {
@@ -914,7 +913,8 @@ void AnonDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
         }
     }
     buf->level--;
-    buf->writestring("}\n");
+    buf->writestring("}");
+    buf->writenl();
 }
 
 const char *AnonDeclaration::kind()
@@ -945,37 +945,6 @@ Dsymbol *PragmaDeclaration::syntaxCopy(Dsymbol *s)
 
 void PragmaDeclaration::setScope(Scope *sc)
 {
-#if TARGET_NET
-    if (ident == Lexer::idPool("assembly"))
-    {
-        if (!args || args->dim != 1)
-        {
-            error("pragma has invalid number of arguments");
-        }
-        else
-        {
-            Expression *e = (*args)[0];
-            e = e->semantic(sc);
-            e = resolveProperties(sc, e);
-            e = e->ctfeInterpret();
-            (*args)[0] = e;
-            StringExp* se = e->toString();
-            if (!se)
-            {
-                error("string expected, not '%s'", e->toChars());
-            }
-            PragmaScope* pragma = new PragmaScope(this, sc->parent, se);
-
-            assert(sc);
-            pragma->setScope(sc);
-
-            //add to module members
-            assert(sc->module);
-            assert(sc->module->members);
-            sc->module->members->push(pragma);
-        }
-    }
-#endif // TARGET_NET
 }
 
 void PragmaDeclaration::semantic(Scope *sc)
@@ -1095,11 +1064,6 @@ void PragmaDeclaration::semantic(Scope *sc)
         goto Lnodecl;
     }
 #endif
-#if TARGET_NET
-    else if (ident == Lexer::idPool("assembly"))
-    {
-    }
-#endif // TARGET_NET
     else if (global.params.ignoreUnsupportedPragmas)
     {
         if (global.params.verbose)

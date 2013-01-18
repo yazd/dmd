@@ -5295,8 +5295,8 @@ void TypeFunction::toDecoBuffer(OutBuffer *buf, int flag)
     Parameter::argsToDecoBuffer(buf, parameters);
     //if (buf->data[buf->offset - 1] == '@') halt();
     buf->writeByte('Z' - varargs);      // mark end of arg list
-    assert(next);
-    next->toDecoBuffer(buf);
+    if(next != NULL)
+        next->toDecoBuffer(buf);
     inuse--;
 }
 
@@ -8154,6 +8154,7 @@ Expression *TypeStruct::defaultInitLiteral(Loc loc)
     for (size_t j = 0; j < structelems->dim; j++)
     {
         VarDeclaration *vd = sym->fields[j];
+        Type *telem = vd->type->addMod(this->mod);
         Expression *e;
         if (vd->init)
         {   if (vd->init->isVoidInitializer())
@@ -8164,7 +8165,10 @@ Expression *TypeStruct::defaultInitLiteral(Loc loc)
         else
             e = vd->type->defaultInitLiteral(loc);
         if (e && vd->scope)
-             e = e->semantic(vd->scope);
+        {
+            e = e->semantic(vd->scope);
+            e = e->implicitCastTo(vd->scope, telem);
+        }
         (*structelems)[j] = e;
     }
     StructLiteralExp *structinit = new StructLiteralExp(loc, (StructDeclaration *)sym, structelems);
@@ -8802,7 +8806,7 @@ int TypeClass::isscope()
 
 int TypeClass::isBaseOf(Type *t, int *poffset)
 {
-    if (t->ty == Tclass)
+    if (t && t->ty == Tclass)
     {   ClassDeclaration *cd;
 
         cd   = ((TypeClass *)t)->sym;
@@ -9379,6 +9383,13 @@ void Parameter::argsToCBuffer(OutBuffer *buf, HdrGenState *hgs, Parameters *argu
             if (arg->storageClass & STCalias)
             {   if (arg->ident)
                     argbuf.writestring(arg->ident->toChars());
+            }
+            else if (arg->type->ty == Tident &&
+                     ((TypeIdentifier *)arg->type)->ident->len > 3 &&
+                     strncmp(((TypeIdentifier *)arg->type)->ident->string, "__T", 3) == 0)
+            {
+                // print parameter name, instead of undetermined type parameter
+                argbuf.writestring(arg->ident->toChars());
             }
             else
                 arg->type->toCBuffer(&argbuf, arg->ident, hgs);

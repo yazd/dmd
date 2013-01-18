@@ -369,7 +369,7 @@ void FuncDeclaration::semantic(Scope *sc)
             isNewDeclaration() || isDelete())
             error("constructors, destructors, postblits, invariants, new and delete functions are not allowed in interface %s", id->toChars());
         if (fbody && isVirtual())
-            error("function body is not abstract in interface %s", id->toChars());
+            error("function body only allowed in final functions in interface %s", id->toChars());
     }
 
     /* Contracts can only appear without a body when they are virtual interface functions
@@ -922,9 +922,6 @@ void FuncDeclaration::semantic3(Scope *sc)
         // Declare hidden variable _arguments[] and _argptr
         if (f->varargs == 1)
         {
-#if TARGET_NET
-            varArgs(sc2, f, argptr, _arguments);
-#else
             Type *t;
 
 #ifndef IN_GCC
@@ -974,7 +971,6 @@ void FuncDeclaration::semantic3(Scope *sc)
                 sc2->insert(argptr);
                 argptr->parent = this;
             }
-#endif
         }
 
 #if 0
@@ -1707,7 +1703,22 @@ void FuncDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
     StorageClassDeclaration::stcToCBuffer(buf, storage_class);
     type->toCBuffer(buf, ident, hgs);
-    bodyToCBuffer(buf, hgs);
+    if(hgs->hdrgen == 1)
+    {
+        if(storage_class & STCauto)
+        {
+            hgs->autoMember++;
+            bodyToCBuffer(buf, hgs);
+            hgs->autoMember--;
+        }
+        else if(hgs->tpltMember == 0 && global.params.useInline == 0)
+            buf->writestring(";");
+        else
+            bodyToCBuffer(buf, hgs);
+    }
+    else
+        bodyToCBuffer(buf, hgs);
+    buf->writenl();
 }
 
 VarDeclaration *FuncDeclaration::declareThis(Scope *sc, AggregateDeclaration *ad)
@@ -1802,21 +1813,27 @@ int FuncDeclaration::equals(Object *o)
 
 void FuncDeclaration::bodyToCBuffer(OutBuffer *buf, HdrGenState *hgs)
 {
-    if (fbody &&
-        (!hgs->hdrgen || hgs->tpltMember || canInline(1,1,1))
-       )
-    {   buf->writenl();
+    if (fbody && (!hgs->hdrgen || global.params.useInline || hgs->autoMember || hgs->tpltMember))
+    {
+        int savetlpt = hgs->tpltMember;
+        int saveauto = hgs->autoMember;
+        hgs->tpltMember = 0;
+        hgs->autoMember = 0;
+
+        buf->writenl();
 
         // in{}
         if (frequire)
-        {   buf->writestring("in");
+        {
+            buf->writestring("in");
             buf->writenl();
             frequire->toCBuffer(buf, hgs);
         }
 
         // out{}
         if (fensure)
-        {   buf->writestring("out");
+        {
+            buf->writestring("out");
             if (outId)
             {   buf->writebyte('(');
                 buf->writestring(outId->toChars());
@@ -1827,7 +1844,8 @@ void FuncDeclaration::bodyToCBuffer(OutBuffer *buf, HdrGenState *hgs)
         }
 
         if (frequire || fensure)
-        {   buf->writestring("body");
+        {
+            buf->writestring("body");
             buf->writenl();
         }
 
@@ -1838,6 +1856,9 @@ void FuncDeclaration::bodyToCBuffer(OutBuffer *buf, HdrGenState *hgs)
         buf->level--;
         buf->writebyte('}');
         buf->writenl();
+
+        hgs->tpltMember = savetlpt;
+        hgs->autoMember = saveauto;
     }
     else
     {   buf->writeByte(';');
@@ -2985,6 +3006,8 @@ enum PURE FuncDeclaration::isPure()
     if (tf->purity == PUREfwdref)
         tf->purityLevel();
     enum PURE purity = tf->purity;
+    if (purity > PUREweak && isNested())
+        purity = PUREweak;
     if (purity > PUREweak && needThis())
     {   // The attribute of the 'this' reference affects purity strength
         if (type->mod & (MODimmutable | MODwild))
@@ -3440,10 +3463,31 @@ const char *FuncLiteralDeclaration::kind()
 
 void FuncLiteralDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 {
-    buf->writestring(kind());
-    buf->writeByte(' ');
-    type->toCBuffer(buf, NULL, hgs);
-    bodyToCBuffer(buf, hgs);
+    if (tok != TOKreserved)
+    {
+        buf->writestring(kind());
+        buf->writeByte(' ');
+    }
+
+    TypeFunction *tf = (TypeFunction *)type;
+    // Don't print tf->mod, tf->trust, and tf->linkage
+    if (tf->next)
+        tf->next->toCBuffer2(buf, hgs, 0);
+    Parameter::argsToCBuffer(buf, hgs, tf->parameters, tf->varargs);
+
+    ReturnStatement *ret = !fbody->isCompoundStatement() ?
+                            fbody->isReturnStatement() : NULL;
+    if (ret && ret->exp)
+    {
+        buf->writestring(" => ");
+        ret->exp->toCBuffer(buf, hgs);
+    }
+    else
+    {
+        hgs->tpltMember++;
+        bodyToCBuffer(buf, hgs);
+        hgs->tpltMember--;
+    }
 }
 
 
@@ -3841,7 +3885,8 @@ int StaticCtorDeclaration::addPostInvariant()
 void StaticCtorDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 {
     if (hgs->hdrgen && !hgs->tpltMember)
-    {   buf->writestring("static this();");
+    {
+        buf->writestring("static this();");
         buf->writenl();
         return;
     }

@@ -320,8 +320,6 @@ typedef long double longdouble;
 // For Shared Code Base
 #define TARGET_INLINEFUNC_NAMES
 #define PASCAL pascal
-#define HINT int
-#define UHINT unsigned int
 #if _WINDLL
 #define dbg_printf dll_printf
 #else
@@ -603,28 +601,19 @@ typedef int bool;
 #define __ss
 #endif
 
-// gcc defines this for us, dmc doesn't, so look for it's __I86__
-#if ! (defined(LITTLE_ENDIAN) || defined(BIG_ENDIAN) )
-#if defined(__I86__) || defined(i386) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64) || defined(_M_I86) || defined(_M_AMD64)
-#define LITTLE_ENDIAN 1
-#else
-#error unknown platform, so unknown endianness
-#endif
-#endif
-
 #if _WINDLL
 #define COPYRIGHT "Copyright © 2001 Digital Mars"
 #else
 #ifdef DEBUG
-#define COPYRIGHT "Copyright (C) Digital Mars 2000-2012.  All Rights Reserved.\n\
+#define COPYRIGHT "Copyright (C) Digital Mars 2000-2013.  All Rights Reserved.\n\
 Written by Walter Bright\n\
 *****BETA TEST VERSION*****"
 #else
 #if linux
-#define COPYRIGHT "Copyright (C) Digital Mars 2000-2012.  All Rights Reserved.\n\
+#define COPYRIGHT "Copyright (C) Digital Mars 2000-2013.  All Rights Reserved.\n\
 Written by Walter Bright, Linux version by Pat Nelson"
 #else
-#define COPYRIGHT "Copyright (C) Digital Mars 2000-2012.  All Rights Reserved.\n\
+#define COPYRIGHT "Copyright (C) Digital Mars 2000-2013.  All Rights Reserved.\n\
 Written by Walter Bright"
 #endif
 #endif

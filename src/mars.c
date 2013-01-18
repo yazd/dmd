@@ -67,7 +67,6 @@ Global::Global()
     obj_ext  = "obj";
 #elif TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
     obj_ext  = "o";
-#elif TARGET_NET
 #else
 #error "fix this"
 #endif
@@ -76,7 +75,6 @@ Global::Global()
     lib_ext  = "lib";
 #elif TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
     lib_ext  = "a";
-#elif TARGET_NET
 #else
 #error "fix this"
 #endif
@@ -92,12 +90,11 @@ Global::Global()
 #endif
 
     copyright = "Copyright (c) 1999-2012 by Digital Mars";
-    written = "written by Walter Bright"
-#if TARGET_NET
-    "\nMSIL back-end (alpha release) by Cristian L. Vlasceanu and associates.";
-#endif
+    written = "written by Walter Bright";
+    version = "v"
+#include "verstr.h"
     ;
-    version = "v2.062";
+
     global.structalign = STRUCTALIGN_DEFAULT;
 
     memset(&params, 0, sizeof(Param));
@@ -461,7 +458,6 @@ int tryMain(size_t argc, char *argv[])
     global.params.defaultlibname = "phobos";
 #elif TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
     global.params.defaultlibname = "phobos2";
-#elif TARGET_NET
 #else
 #error "fix this"
 #endif
@@ -472,10 +468,6 @@ int tryMain(size_t argc, char *argv[])
 #if TARGET_WINDOS
     VersionCondition::addPredefinedGlobalIdent("Windows");
     global.params.isWindows = 1;
-#if TARGET_NET
-    // TARGET_NET macro is NOT mutually-exclusive with TARGET_WINDOS
-    VersionCondition::addPredefinedGlobalIdent("D_NET");
-#endif
 #elif TARGET_LINUX
     VersionCondition::addPredefinedGlobalIdent("Posix");
     VersionCondition::addPredefinedGlobalIdent("linux");
@@ -867,6 +859,14 @@ int tryMain(size_t argc, char *argv[])
                 global.params.runargs_length = ((i >= argcstart) ? argc : argcstart) - i - 1;
                 if (global.params.runargs_length)
                 {
+                    char *ext = FileName::ext(argv[i + 1]);
+                    if (ext && FileName::equals(ext, "d") == 0
+                            && FileName::equals(ext, "di") == 0)
+                    {
+                        error(0, "-run must be followed by a source file, not '%s'", argv[i + 1]);
+                        break;
+                    }
+
                     files.push(argv[i + 1]);
                     global.params.runargs = &argv[i + 2];
                     i += global.params.runargs_length;

@@ -1137,7 +1137,7 @@ Type *functionParameters(Loc loc, Scope *sc, TypeFunction *tf,
                 if (p->type->hasWild())
                 {
                     arg = arg->implicitCastTo(sc, p->type->substWildTo(wildmatch));
-                    arg = arg->optimize(WANTvalue);
+                    arg = arg->optimize(WANTvalue, p->storageClass & STCref);
                 }
                 else if (p->type != arg->type)
                 {
@@ -1149,7 +1149,7 @@ Type *functionParameters(Loc loc, Scope *sc, TypeFunction *tf,
                     }
                     else
                         arg = arg->implicitCastTo(sc, p->type);
-                    arg = arg->optimize(WANTvalue);
+                    arg = arg->optimize(WANTvalue, p->storageClass & STCref);
                 }
             }
             if (p->storageClass & STCref)
@@ -10070,6 +10070,19 @@ Expression *IndexExp::semantic(Scope *sc)
     switch (t1->ty)
     {
         case Tpointer:
+            e2 = e2->implicitCastTo(sc, Type::tsize_t);
+            e2 = e2->optimize(WANTvalue);
+            if (e2->op == TOKint64 && e2->toInteger() == 0)
+                ;
+            else if (sc->func->setUnsafe())
+            {
+                error("safe function '%s' cannot index pointer '%s'",
+                    sc->func->toPrettyChars(), e1->toChars());
+                return new ErrorExp();
+            }
+            e->type = ((TypeNext *)t1)->next;
+            break;
+
         case Tarray:
             e2 = e2->implicitCastTo(sc, Type::tsize_t);
             e->type = ((TypeNext *)t1)->next;
