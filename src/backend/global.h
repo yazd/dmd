@@ -333,6 +333,7 @@ Symbol *symbol_genauto(type *t);
 Symbol *symbol_genauto(elem *e);
 Symbol *symbol_genauto(tym_t ty);
 void symbol_func(Symbol *);
+void symbol_struct_addField(Symbol *s, const char *name, type *t, unsigned offset);
 Funcsym *symbol_funcalias(Funcsym *sf);
 Symbol *defsy(const char *p, Symbol **parent);
 void symbol_addtotree(Symbol **parent,Symbol *s);
@@ -350,7 +351,9 @@ SYMIDX symbol_add(Symbol *s);
 void freesymtab(Symbol **stab, SYMIDX n1, SYMIDX n2);
 Symbol * symbol_copy(Symbol *s);
 Symbol * symbol_searchlist(symlist_t sl, const char *vident);
-
+void slist_add(Symbol *s);
+void slist_reset();
+
 
 #if TX86
 // cg87.c

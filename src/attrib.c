@@ -28,9 +28,6 @@
 #include "parse.h"
 #include "template.h"
 
-extern bool obj_includelib(const char *name);
-void obj_startaddress(Symbol *s);
-
 
 /********************************* AttribDeclaration ****************************/
 
@@ -247,19 +244,6 @@ void AttribDeclaration::emitComment(Scope *sc)
     }
 }
 
-void AttribDeclaration::toObjFile(int multiobj)
-{
-    Dsymbols *d = include(NULL, NULL);
-
-    if (d)
-    {
-        for (size_t i = 0; i < d->dim; i++)
-        {   Dsymbol *s = (*d)[i];
-            s->toObjFile(multiobj);
-        }
-    }
-}
-
 void AttribDeclaration::setFieldOffset(AggregateDeclaration *ad, unsigned *poffset, bool isunion)
 {
     Dsymbols *d = include(NULL, NULL);
@@ -472,7 +456,14 @@ void StorageClassDeclaration::semantic(Scope *sc)
     }
 }
 
-void StorageClassDeclaration::stcToCBuffer(OutBuffer *buf, StorageClass stc)
+
+/*************************************************
+ * Pick off one of the storage classes from stc,
+ * and return a pointer to a string representation of it.
+ * stc is reduced by the one picked.
+ * tmp[] is a buffer big enough to hold that string.
+ */
+const char *StorageClassDeclaration::stcToChars(char tmp[], StorageClass& stc)
 {
     struct SCstring
     {
@@ -504,7 +495,7 @@ void StorageClassDeclaration::stcToCBuffer(OutBuffer *buf, StorageClass stc)
         { STCnothrow,      TOKnothrow },
         { STCpure,         TOKpure },
         { STCref,          TOKref },
-        { STCtls,          TOKtls },
+        { STCtls },
         { STCgshared,      TOKgshared },
         { STCproperty,     TOKat,       Id::property },
         { STCsafe,         TOKat,       Id::safe },
@@ -516,20 +507,41 @@ void StorageClassDeclaration::stcToCBuffer(OutBuffer *buf, StorageClass stc)
 
     for (int i = 0; i < sizeof(table)/sizeof(table[0]); i++)
     {
-        if (stc & table[i].stc)
+        StorageClass tbl = table[i].stc;
+        assert(tbl & STCStorageClass);
+        if (stc & tbl)
         {
+            stc &= ~tbl;
+            if (tbl == STCtls)  // TOKtls was removed
+                return "__thread";
+
             enum TOK tok = table[i].tok;
 #if DMDV2
             if (tok == TOKat)
             {
-                buf->writeByte('@');
-                buf->writestring(table[i].id->toChars());
+                tmp[0] = '@';
+                strcpy(tmp + 1, table[i].id->toChars());
+                return tmp;
             }
             else
 #endif
-                buf->writestring(Token::toChars(tok));
-            buf->writeByte(' ');
+                return Token::toChars(tok);
         }
+    }
+    //printf("stc = %llx\n", (unsigned long long)stc);
+    return NULL;
+}
+
+void StorageClassDeclaration::stcToCBuffer(OutBuffer *buf, StorageClass stc)
+{
+    while (stc)
+    {   char tmp[20];
+        const char *p = stcToChars(tmp, stc);
+        if (!p)
+            break;
+        assert(strlen(p) < sizeof(tmp));
+        buf->writestring(p);
+        buf->writeByte(' ');
     }
 }
 
@@ -1007,44 +1019,6 @@ void PragmaDeclaration::semantic(Scope *sc)
         }
         goto Lnodecl;
     }
-#ifdef IN_GCC
-    else if (ident == Id::GNU_asm)
-    {
-        if (! args || args->dim != 2)
-            error("identifier and string expected for asm name");
-        else
-        {
-            Expression *e;
-            Declaration *d = NULL;
-            StringExp *s = NULL;
-
-            e = (*args)[0];
-            e = e->semantic(sc);
-            if (e->op == TOKvar)
-            {
-                d = ((VarExp *)e)->var;
-                if (! d->isFuncDeclaration() && ! d->isVarDeclaration())
-                    d = NULL;
-            }
-            if (!d)
-                error("first argument of GNU_asm must be a function or variable declaration");
-
-            e = (*args)[1];
-            e = e->semantic(sc);
-            e = resolveProperties(sc, e);
-            e = e->ctfeInterpret();
-            e = e->toString();
-            if (e && ((StringExp *)e)->sz == 1)
-                s = ((StringExp *)e);
-            else
-                error("second argument of GNU_asm must be a character string");
-
-            if (d && s)
-                d->c_ident = Lexer::idPool((char*) s->string);
-        }
-        goto Lnodecl;
-    }
-#endif
 #if DMDV2
     else if (ident == Id::startaddress)
     {
@@ -1124,49 +1098,6 @@ int PragmaDeclaration::oneMember(Dsymbol **ps, Identifier *ident)
 const char *PragmaDeclaration::kind()
 {
     return "pragma";
-}
-
-void PragmaDeclaration::toObjFile(int multiobj)
-{
-    if (ident == Id::lib)
-    {
-        assert(args && args->dim == 1);
-
-        Expression *e = (*args)[0];
-
-        assert(e->op == TOKstring);
-
-        StringExp *se = (StringExp *)e;
-        char *name = (char *)mem.malloc(se->len + 1);
-        memcpy(name, se->string, se->len);
-        name[se->len] = 0;
-
-        /* Embed the library names into the object file.
-         * The linker will then automatically
-         * search that library, too.
-         */
-        if (!obj_includelib(name))
-        {
-            /* The format does not allow embedded library names,
-             * so instead append the library name to the list to be passed
-             * to the linker.
-             */
-            global.params.libfiles->push(name);
-        }
-    }
-#if DMDV2
-    else if (ident == Id::startaddress)
-    {
-        assert(args && args->dim == 1);
-        Expression *e = (*args)[0];
-        Dsymbol *sa = getDsymbol(e);
-        FuncDeclaration *f = sa->isFuncDeclaration();
-        assert(f);
-        Symbol *s = f->toSymbol();
-        obj_startaddress(s);
-    }
-#endif
-    AttribDeclaration::toObjFile(multiobj);
 }
 
 void PragmaDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)

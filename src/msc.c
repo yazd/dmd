@@ -27,7 +27,6 @@ static char __file__[] = __FILE__;      /* for tassert.h                */
 
 
 extern Global global;
-extern int REALSIZE;
 
 Config config;
 Configv configv;
@@ -46,7 +45,8 @@ void out_config_init(
         int symdebug,   // add symbolic debug information
                         // 1: D
                         // 2: fake it with C symbolic debug info
-        bool alwaysframe        // always create standard function frame
+        bool alwaysframe,       // always create standard function frame
+        bool stackstomp         // add stack stomping code
         );
 
 void out_config_debug(
@@ -93,7 +93,8 @@ void backend_init()
         params->verbose,
         params->optimize,
         params->symdebug,
-        params->alwaysframe
+        params->alwaysframe,
+        params->stackstomp
     );
 
 #ifdef DEBUG
@@ -162,41 +163,6 @@ symbol *symboldata(targ_size_t offset,tym_t ty)
     symbol_keep(s);             // keep around
     return s;
 }
-
-/************************************
- * Add symbol to slist.
- */
-
-static list_t slist;
-
-void slist_add(Symbol *s)
-{
-    list_prepend(&slist,s);
-}
-
-/*************************************
- */
-
-void slist_reset()
-{
-    //printf("slist_reset()\n");
-    for (list_t sl = slist; sl; sl = list_next(sl))
-    {   Symbol *s = list_symbol(sl);
-
-#if MACHOBJ
-        s->Soffset = 0;
-#endif
-        s->Sxtrnnum = 0;
-        s->Stypidx = 0;
-        s->Sflags &= ~(STRoutdef | SFLweak);
-        if (s->Sclass == SCglobal || s->Sclass == SCcomdat ||
-            s->Sfl == FLudata || s->Sclass == SCstatic)
-        {   s->Sclass = SCextern;
-            s->Sfl = FLextern;
-        }
-    }
-}
-
 
 /**************************************
  */

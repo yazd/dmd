@@ -93,7 +93,18 @@ template bug6661(Q)
     const Q blaz = 6;
 }
 
-static assert(is(typeof(bug6661!(int).blaz)));
+static assert(!is(typeof(bug6661!(int).blaz)));
+
+template bug6661x(Q)
+{
+    int qutz(Q y)
+    {
+        Q q = "abc";
+        return 67;
+    }
+}
+// should pass, but doesn't in current
+//static assert(!is(typeof(bug6661x!(int))));
 
 /**************************************************
     6599    ICE(constfold.c) or segfault
@@ -376,3 +387,13 @@ alias test8163!(ubyte, ubyte, ubyte, ubyte, ubyte, ubyte, ubyte, ubyte) _BBBBBBB
 alias test8163!(ubyte, ubyte, ushort, float) _BBSf;
 
 
+/***************************************************/
+// 9348
+
+void test9348()
+{
+    @property Object F(int E)() { return null; }
+
+    assert(F!0 !is null);
+    assert(F!0 !in [new Object():1]);
+}

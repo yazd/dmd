@@ -278,27 +278,8 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
         error("circular dependency. Functions cannot be interpreted while being compiled");
         return EXP_CANT_INTERPRET;
     }
-    if (semanticRun < PASSsemantic3 && scope)
-    {
-        /* Forward reference - we need to run semantic3 on this function.
-         * If errors are gagged, and it's not part of a speculative
-         * template instance, we need to temporarily ungag errors.
-         */
-        int olderrors = global.errors;
-        int oldgag = global.gag;
-        TemplateInstance *spec = isSpeculative();
-        if (global.gag && !spec)
-            global.gag = 0;
-        semantic3(scope);
-        global.gag = oldgag;    // regag errors
-
-        // If it is a speculatively-instantiated template, and errors occur,
-        // we need to mark the template as having errors.
-        if (spec && global.errors != olderrors)
-            spec->errors = global.errors - olderrors;
-        if (olderrors != global.errors) // if errors compiling this function
-            return EXP_CANT_INTERPRET;
-    }
+    if (!functionSemantic3())
+        return EXP_CANT_INTERPRET;
     if (semanticRun < PASSsemantic3done)
         return EXP_CANT_INTERPRET;
 
@@ -326,7 +307,6 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
     istatex.localThis = thisarg;
     istatex.framepointer = ctfeStack.startFrame();
 
-    Expressions vsave;          // place to save previous parameter values
     size_t dim = 0;
     if (needThis() && !thisarg)
     {   // error, no this. Prevent segfault.
@@ -343,7 +323,6 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
     {
         dim = arguments->dim;
         assert(!dim || (parameters && (parameters->dim == dim)));
-        vsave.setDim(dim);
 
         /* Evaluate all the arguments to the function,
          * store the results in eargs[]
@@ -2412,27 +2391,6 @@ BIN_INTERPRET2(Cmp, ctfeCmp)
 /* Helper functions for BinExp::interpretAssignCommon
  */
 
-// Return true if e is derived from UnaryExp.
-// Consider moving this function into Expression.
-UnaExp *isUnaExp(Expression *e)
-{
-   switch (e->op)
-   {
-        case TOKdotvar:
-        case TOKindex:
-        case TOKslice:
-        case TOKcall:
-        case TOKdot:
-        case TOKdotti:
-        case TOKdottype:
-        case TOKcast:
-            return (UnaExp *)e;
-        default:
-            break;
-    }
-    return NULL;
-}
-
 // Returns the variable which is eventually modified, or NULL if an rvalue.
 // thisval is the current value of 'this'.
 VarDeclaration * findParentVar(Expression *e, Expression *thisval)
@@ -3968,7 +3926,7 @@ Expression *CallExp::interpret(InterState *istate, CtfeGoal goal)
 
     TypeFunction *tf = fd ? (TypeFunction *)(fd->type) : NULL;
     if (!tf)
-    {   // DAC: This should never happen, it's an internal compiler error.
+    {   // This should never happen, it's an internal compiler error.
         //printf("ecall=%s %d %d\n", ecall->toChars(), ecall->op, TOKcall);
         if (ecall->op == TOKidentifier)
             error("cannot evaluate %s at compile time. Circular reference?", toChars());

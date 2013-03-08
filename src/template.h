@@ -30,6 +30,7 @@ struct TemplateValueParameter;
 struct TemplateAliasParameter;
 struct TemplateTupleParameter;
 struct Type;
+struct TypeQualified;
 struct TypeTypeof;
 struct Scope;
 struct Expression;
@@ -85,14 +86,15 @@ struct TemplateDeclaration : ScopeDsymbol
     char *toChars();
 
     void emitComment(Scope *sc);
-    void toJsonBuffer(OutBuffer *buf);
+    void toJson(JsonOut *json);
+    virtual void jsonProperties(JsonOut *json);
 //    void toDocBuffer(OutBuffer *buf);
 
     MATCH matchWithInstance(TemplateInstance *ti, Objects *atypes, Expressions *fargs, int flag);
     MATCH leastAsSpecialized(TemplateDeclaration *td2, Expressions *fargs);
 
-    MATCH deduceFunctionTemplateMatch(Scope *sc, Loc loc, Objects *targsi, Expression *ethis, Expressions *fargs, Objects *dedargs);
-    FuncDeclaration *deduceFunctionTemplate(Scope *sc, Loc loc, Objects *targsi, Expression *ethis, Expressions *fargs, int flags = 0);
+    MATCH deduceFunctionTemplateMatch(Loc loc, Scope *sc, Objects *tiargs, Expression *ethis, Expressions *fargs, Objects *dedargs);
+    FuncDeclaration *deduceFunctionTemplate(Loc loc, Scope *sc, Objects *tiargs, Expression *ethis, Expressions *fargs, int flags = 0);
     Object *declareParameter(Scope *sc, TemplateParameter *tp, Object *o);
     FuncDeclaration *doHeaderInstantiation(Scope *sc, Objects *tdargs, Expressions *fargs);
 
@@ -320,16 +322,16 @@ struct TemplateInstance : ScopeDsymbol
     int oneMember(Dsymbol **ps, Identifier *ident);
     int needsTypeInference(Scope *sc);
     char *toChars();
-    char *mangle();
+    char *mangle(bool isv = false);
     void printInstantiationTrace();
 
     void toObjFile(int multiobj);                       // compile to .obj file
 
     // Internal
     static void semanticTiargs(Loc loc, Scope *sc, Objects *tiargs, int flags);
-    void semanticTiargs(Scope *sc);
-    TemplateDeclaration *findTemplateDeclaration(Scope *sc);
-    TemplateDeclaration *findBestMatch(Scope *sc, Expressions *fargs);
+    bool semanticTiargs(Scope *sc);
+    bool findTemplateDeclaration(Scope *sc);
+    bool findBestMatch(Scope *sc, Expressions *fargs);
     void declareParameters(Scope *sc);
     int hasNestedArgs(Objects *tiargs);
     Identifier *genIdent(Objects *args);
@@ -343,10 +345,9 @@ struct TemplateInstance : ScopeDsymbol
 
 struct TemplateMixin : TemplateInstance
 {
-    Identifiers *idents;
-    Type *tqual;
+    TypeQualified *tqual;
 
-    TemplateMixin(Loc loc, Identifier *ident, Type *tqual, Identifiers *idents, Objects *tiargs);
+    TemplateMixin(Loc loc, Identifier *ident, TypeQualified *tqual, Objects *tiargs);
     Dsymbol *syntaxCopy(Dsymbol *s);
     void semantic(Scope *sc);
     void semantic2(Scope *sc);
@@ -359,6 +360,7 @@ struct TemplateMixin : TemplateInstance
     void setFieldOffset(AggregateDeclaration *ad, unsigned *poffset, bool isunion);
     char *toChars();
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
+    void toJson(JsonOut *json);
 
     void toObjFile(int multiobj);                       // compile to .obj file
 

@@ -5245,7 +5245,7 @@ int bar8840(long g) { assert(g == 4); return printf("%llx\n", g); }
 
 void test8840()
 {
-    long f1 = foo8840();    
+    long f1 = foo8840();
     long f2 = foo8840();
 
     long f = (f1 < f2 ? f1 : f2);
@@ -5453,6 +5453,14 @@ void test9248()
 }
 
 /***************************************************/
+// 6057
+void test6057()
+{
+    enum Foo { A=1, B=2 }
+    Foo[] bar = [cast(Foo)1];
+}
+
+/***************************************************/
 
 ulong d2ulong(double u)
 {
@@ -5609,22 +5617,87 @@ void test250()
 {
     static uint[2]  a1 = [0x1001_1100, 0x0220_0012];
 
-    if ( bt32(a1,30)) assert(0);
-    if (!bt32(a1,8))  assert(0);
-    if ( bt32(a1,30+32)) assert(0);
-    if (!bt32(a1,1+32))  assert(0);
+    if ( bt32(a1.ptr,30)) assert(0);
+    if (!bt32(a1.ptr,8))  assert(0);
+    if ( bt32(a1.ptr,30+32)) assert(0);
+    if (!bt32(a1.ptr,1+32))  assert(0);
 
     static ulong[2] a2 = [0x1001_1100_12345678, 0x0220_0012_12345678];
 
-    if ( bt64a(a2,30+32)) assert(0);
-    if (!bt64a(a2,8+32))  assert(0);
-    if ( bt64a(a2,30+32+64)) assert(0);
-    if (!bt64a(a2,1+32+64))  assert(0);
+    if ( bt64a(a2.ptr,30+32)) assert(0);
+    if (!bt64a(a2.ptr,8+32))  assert(0);
+    if ( bt64a(a2.ptr,30+32+64)) assert(0);
+    if (!bt64a(a2.ptr,1+32+64))  assert(0);
 
-    if ( bt64b(a2,30+32)) assert(0);
-    if (!bt64b(a2,8+32))  assert(0);
-    if ( bt64b(a2,30+32+64)) assert(0);
-    if (!bt64b(a2,1+32+64))  assert(0);
+    if ( bt64b(a2.ptr,30+32)) assert(0);
+    if (!bt64b(a2.ptr,8+32))  assert(0);
+    if ( bt64b(a2.ptr,30+32+64)) assert(0);
+    if (!bt64b(a2.ptr,1+32+64))  assert(0);
+}
+
+/***************************************************/
+
+struct S251 { int a,b,c,d; }
+
+S251 foo251(S251 s)
+{
+    S251 a = s;
+    S251 b = a;	// copy propagation
+    S251 c = b;
+    S251 d = c;
+    S251 e = d;	// dead assignment
+    return d;
+}
+
+void test251()
+{
+    S251 a;
+    a.a = 1;
+    a.b = 2;
+    a.c = 3;
+    a.d = 4;
+    a = foo251(a);
+    assert(a.a == 1);
+    assert(a.b == 2);
+    assert(a.c == 3);
+    assert(a.d == 4);
+}
+
+/***************************************************/
+// 9387
+
+void bug9387a(double x) { }
+
+void ice9387()
+{
+    double x = 0.3;
+    double r = x*0.1;
+    double q = x*0.1 + r;
+    double p = x*0.1 + r*0.2;
+    if ( q )
+        p = -p;
+    bug9387a(p);
+}
+
+/***************************************************/
+
+void bug6962(string value)
+{
+    string v = value;
+    try
+    {
+        v = v[0LU..0LU];
+        return;
+    }
+    finally
+    {
+        assert(!v.length);
+    }
+}
+
+void test6962()
+{
+    bug6962("42");
 }
 
 /***************************************************/
@@ -5907,6 +5980,9 @@ int main()
     test248();
     test249();
     test250();
+    test6057();
+    test251();
+    test6962();
 
     writefln("Success");
     return 0;

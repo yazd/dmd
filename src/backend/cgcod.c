@@ -1288,7 +1288,11 @@ STATIC void blcodgen(block *bl)
         regcon.indexregs &= regcon.indexregs - 1;
     }
 
-    regsave.idx = 0;
+    /* This doesn't work when calling the BC_finally function,
+     * as it is one block calling another.
+     */
+    //regsave.idx = 0;
+
     reflocal = 0;
     refparamsave = refparam;
     refparam = 0;
@@ -1718,7 +1722,8 @@ code *allocreg(regm_t *pretregs,unsigned *preg,tym_t tym
 
 #if 0
         if (pass == PASSfinal)
-        {   dbg_printf("allocreg %s,%d: regcon.mvar %s regcon.cse.mval %s msavereg %s *pretregs %s tym ",
+        {
+            dbg_printf("allocreg %s,%d: regcon.mvar %s regcon.cse.mval %s msavereg %s *pretregs %s tym ",
                 file,line,regm_str(regcon.mvar),regm_str(regcon.cse.mval),
                 regm_str(msavereg),regm_str(*pretregs));
             WRTYxx(tym);

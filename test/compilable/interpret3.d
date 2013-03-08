@@ -1108,7 +1108,8 @@ struct Zadok
     int bfg()
     {
         z[0] = 56;
-        fog(z[]) = [56, 6, 8];
+        auto zs = z[];
+        fog(zs) = [56, 6, 8];
         assert(z[1] == 6);
         assert(z[0] == 56);
         return z[2];
@@ -4249,7 +4250,7 @@ static assert(bug7245(1)==5);
 
 int bug8498()
 {
-    foreach(i; 0..5)
+    foreach(ref i; 0..5)
     {
         assert(i == 0);
         i = 100;

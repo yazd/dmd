@@ -1128,7 +1128,7 @@ void test43()
 {
     int i;
     assert(!__traits(compiles, immutable(S43)(3, &i)));
-    immutable int j = 4; 
+    immutable int j = 4;
     auto s = immutable(S43)(3, &j);
     //writeln(typeid(typeof(s)));
     static assert(is(typeof(s) == immutable(S43)));
@@ -1146,7 +1146,7 @@ void test44()
 {
     int i;
     assert(!__traits(compiles, immutable(S44)(3, &i)));
-    immutable int j = 4; 
+    immutable int j = 4;
     auto s = immutable(S44)(3, &j);
     //writeln(typeid(typeof(s)));
     static assert(is(typeof(s) == immutable(S44)));
@@ -2371,6 +2371,40 @@ alias X8475!(true).XY Xtrue;
 
 /**********************************/
 
+struct Foo9320 {
+    real x;
+
+    this(real x) {
+        this.x = x;
+    }
+
+    Foo9320 opBinary(string op)(Foo9320 other) {
+        return Foo9320(mixin("x" ~ op ~ "other.x"));
+    }
+}
+
+Foo9320 test9320(Foo9320 a, Foo9320 b, Foo9320 c) {
+    return (a + b) / (a * b) - c;
+}
+
+/**********************************/
+// 9441
+
+auto x9441 = X9441(0.123);
+
+struct X9441
+{
+    int a;
+    this(double x) { a = cast(int)(x * 100); }
+}
+
+void test9441()
+{
+    assert(x9441.a == 12);
+}
+
+/**********************************/
+
 int main()
 {
     test1();
@@ -2452,6 +2486,7 @@ int main()
     test7579b();
     test8335();
     test8356();
+    test9441();
 
     printf("Success\n");
     return 0;

@@ -586,7 +586,7 @@ void test8198()
         return f => x => f(n(f)(x));
     }
 
-    auto n = &zero!uint;
+    uint delegate(uint) delegate(uint delegate(uint)) n = &zero!uint;
     foreach (i; 0..10)
     {
         assert(n(x => x + 1)(0) == i);
@@ -717,6 +717,40 @@ void test9153()
 }
 
 /***************************************************/
+// 9393
+
+template ifThrown9393a(E)
+{
+    void ifThrown9393a(T)(scope T delegate(E) errHandler)
+    {
+    }
+}
+void ifThrown9393b(E, T)(scope T delegate(E) errHandler)
+{
+}
+
+void foo9393(T)(void delegate(T) dg){ dg(T.init); }
+void foo9393()(void delegate(int) dg){ foo9393!int(dg); }
+
+void test9393()
+{
+    ifThrown9393a!Exception(e => 10);
+    ifThrown9393b!Exception(e => 10);
+
+    foo9393((x){ assert(x == int.init); });
+}
+
+/***************************************************/
+// 9415
+
+void test9415()
+{
+    int z;
+    typeof((int a){return z;}) dg;
+    dg = (int a){return z;};
+}
+
+/***************************************************/
 
 int main()
 {
@@ -758,6 +792,8 @@ int main()
     test8496();
     test8575();
     test9153();
+    test9393();
+    test9415();
 
     printf("Success\n");
     return 0;

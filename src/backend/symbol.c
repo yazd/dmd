@@ -414,6 +414,22 @@ void symbol_func(symbol *s)
         s->Sfunc = func_calloc();
 }
 
+/***************************************
+ * Add a field to a struct s.
+ * Input:
+ *      s       the struct symbol
+ *      name    field name
+ *      t       the type of the field
+ *      offset  offset of the field
+ */
+
+void symbol_struct_addField(Symbol *s, const char *name, type *t, unsigned offset)
+{
+    Symbol *s2 = symbol_name(name, SCmember, t);
+    s2->Smemoff = offset;
+    list_append(&s->Sstruct->Sfldlst, s2);
+}
+
 /********************************
  * Define symbol in specified symbol table.
  * Returns:
@@ -2337,6 +2353,44 @@ void symbol_gendebuginfo()
 }
 
 #endif
+
+/************************************
+ * Add symbol to global slist, which are symbols we need to keep around
+ * for next obj file to be created.
+ */
+
+static list_t slist;
+
+void slist_add(Symbol *s)
+{
+    list_prepend(&slist,s);
+}
+
+/*************************************
+ * Resets Symbols so they are now "externs" to the next obj file being created.
+ */
+
+void slist_reset()
+{
+    //printf("slist_reset()\n");
+    for (list_t sl = slist; sl; sl = list_next(sl))
+    {   Symbol *s = list_symbol(sl);
+
+#if MACHOBJ
+        s->Soffset = 0;
+#endif
+        s->Sxtrnnum = 0;
+        s->Stypidx = 0;
+        s->Sflags &= ~(STRoutdef | SFLweak);
+        if (s->Sclass == SCglobal || s->Sclass == SCcomdat ||
+            s->Sfl == FLudata || s->Sclass == SCstatic)
+        {   s->Sclass = SCextern;
+            s->Sfl = FLextern;
+        }
+    }
+}
+
+
 
 #endif /* !SPP */
 

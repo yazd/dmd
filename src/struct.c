@@ -81,6 +81,7 @@ void AggregateDeclaration::semantic2(Scope *sc)
     if (members)
     {
         sc = sc->push(this);
+        sc->parent = this;
         for (size_t i = 0; i < members->dim; i++)
         {
             Dsymbol *s = (*members)[i];
@@ -97,6 +98,7 @@ void AggregateDeclaration::semantic3(Scope *sc)
     if (members)
     {
         sc = sc->push(this);
+        sc->parent = this;
         for (size_t i = 0; i < members->dim; i++)
         {
             Dsymbol *s = (*members)[i];
@@ -166,7 +168,7 @@ unsigned AggregateDeclaration::size(Loc loc)
                         v->semantic(NULL);
                     if (v->storage_class & (STCstatic | STCextern | STCtls | STCgshared | STCmanifest | STCctfe | STCtemplateparameter))
                         return 0;
-                    if (v->storage_class & STCfield && v->sem >= SemanticDone)
+                    if (v->isField() && v->sem >= SemanticDone)
                         return 0;
                     return 1;
                 }
@@ -420,11 +422,7 @@ void StructDeclaration::semantic(Scope *sc)
 
     parent = sc->parent;
     type = type->semantic(loc, sc);
-#if STRUCTTHISREF
     handle = type;
-#else
-    handle = type->pointerTo();
-#endif
     protection = sc->protection;
     alignment = sc->structalign;
     storage_class |= sc->stc;
@@ -711,7 +709,7 @@ void StructDeclaration::finalizeSize(Scope *sc)
 
 void StructDeclaration::makeNested()
 {
-    if (!isnested && sizeok != SIZEOKdone)
+    if (!isnested && sizeok != SIZEOKdone && !isUnionDeclaration())
     {
         // If nested struct, add in hidden 'this' pointer to outer scope
         if (!(storage_class & STCstatic))
@@ -772,7 +770,7 @@ bool StructDeclaration::isPOD()
     {
         Dsymbol *s = fields[i];
         VarDeclaration *v = s->isVarDeclaration();
-        assert(v && v->storage_class & STCfield);
+        assert(v && v->isField());
         if (v->storage_class & STCref)
             continue;
         Type *tv = v->type->toBasetype();

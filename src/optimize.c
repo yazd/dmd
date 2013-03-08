@@ -27,9 +27,6 @@
 
 #ifdef IN_GCC
 #include "d-gcc-real.h"
-
-/* %% fix? */
-extern "C" bool real_isnan (const real_t *);
 #endif
 
 static real_t zero;     // work around DMC bug for now
@@ -804,19 +801,19 @@ Expression *shift_optimize(int result, BinExp *e, Expression *(*shift)(Type *, E
 Expression *ShlExp::optimize(int result, bool keepLvalue)
 {
     //printf("ShlExp::optimize(result = %d) %s\n", result, toChars());
-    return shift_optimize(result, this, Shl);
+    return shift_optimize(result, this, &Shl);
 }
 
 Expression *ShrExp::optimize(int result, bool keepLvalue)
 {
     //printf("ShrExp::optimize(result = %d) %s\n", result, toChars());
-    return shift_optimize(result, this, Shr);
+    return shift_optimize(result, this, &Shr);
 }
 
 Expression *UshrExp::optimize(int result, bool keepLvalue)
 {
     //printf("UshrExp::optimize(result = %d) %s\n", result, toChars());
-    return shift_optimize(result, this, Ushr);
+    return shift_optimize(result, this, &Ushr);
 }
 
 Expression *AndExp::optimize(int result, bool keepLvalue)

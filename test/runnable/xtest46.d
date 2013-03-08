@@ -945,6 +945,39 @@ void test48()
 }
 
 /***************************************************/
+// 6408
+
+static assert(!is(typeof(string[0..1].init)));
+static assert(is(typeof(string[].init) == string[]));
+static assert(is(typeof(string[][].init) == string[][]));
+static assert(is(typeof(string[][][].init) == string[][][]));
+
+static assert(is(typeof(string[1].init) == string[1]));
+static assert(is(typeof(string[1][1].init) == string[1][1]));
+static assert(is(typeof(string[1][1][1].init) == string[1][1][1]));
+
+static assert(is(typeof(string[string].init) == string[string]));
+static assert(is(typeof(string[string][string].init) == string[string][string]));
+static assert(is(typeof(string[string][string][string].init) == string[string][string][string]));
+
+template TT6408(T...) { alias T TT6408; }
+static assert(is(typeof(TT6408!(int, int)[].init) == TT6408!(int, int)));
+static assert(is(typeof(TT6408!(int, int)[0..$].init) == TT6408!(int, int)));
+static assert(is(typeof(TT6408!(int, int)[$-1].init) == int));
+
+/***************************************************/
+// 9409
+
+template TT9409(T...) { alias T TT9409; }
+
+template idxTypes9409(Prefix...)
+{
+    TT9409!((Prefix[$-1])) idxTypes9409;
+}
+
+alias idxTypes9409!(int) Types9409;
+
+/***************************************************/
 
 struct S49
 {
@@ -2844,6 +2877,12 @@ int test137(){
 
 /***************************************************/
 
+// 9366
+static assert(!is(typeof((void[]).init ~ cast(void)0)));
+static assert(!is(typeof(cast(void)0 ~ (void[]).init)));
+
+/***************************************************/
+
 struct Size138
 {
     union
@@ -3452,6 +3491,29 @@ void test155()
     b = 1;
     b = i % b;
     b = b >> i;
+}
+
+/***************************************************/
+// 2486
+
+void test2486()
+{
+    void foo(ref int[] arr) {}
+
+    int[] arr = [1,2,3];
+    foo(arr);   //OK
+    static assert(!__traits(compiles, foo(arr[1..2]))); // should be NG
+
+    struct S
+    {
+        int[] a;
+        auto ref opSlice(){ return a[]; }  // line 4
+    }
+    S s;
+    s[];
+    // opSlice should return rvalue
+    static assert(is(typeof(&S.opSlice) == int[] function()));
+    static assert(!__traits(compiles, foo(s[])));       // should be NG
 }
 
 /***************************************************/
@@ -4077,6 +4139,62 @@ void test6473()
 }
 
 /***************************************************/
+
+void test6578()
+{
+    static struct Foo
+    {
+        this(int x) {}
+    }
+    auto f1 = new const(Foo)(1);
+    auto f2 = new immutable(Foo)(1);
+    auto f3 = new shared(Foo)(1);
+    auto f4 = const(Foo)(1);
+    auto f5 = immutable(Foo)(1);
+    auto f6 = shared(Foo)(1);
+    static assert(is(typeof(f1) == const(Foo)*));
+    static assert(is(typeof(f2) == immutable(Foo)*));
+    static assert(is(typeof(f3) == shared(Foo)*));
+    static assert(is(typeof(f4) == const(Foo)));
+    static assert(is(typeof(f5) == immutable(Foo)));
+    static assert(is(typeof(f6) == shared(Foo)));
+
+    static struct Bar
+    {
+        this(int x) const {}
+    }
+    auto g1 = new const(Bar)(1);
+    auto g2 = new immutable(Bar)(1);
+    auto g3 = new shared(Bar)(1);
+    auto g4 = const(Bar)(1);
+    auto g5 = immutable(Bar)(1);
+    auto g6 = shared(Bar)(1);
+    static assert(is(typeof(g1) == const(Bar)*));
+    static assert(is(typeof(g2) == immutable(Bar)*));
+    static assert(is(typeof(g3) == shared(const(Bar))*));
+    static assert(is(typeof(g4) == const(Bar)));
+    static assert(is(typeof(g5) == immutable(Bar)));
+    static assert(is(typeof(g6) == shared(const(Bar))));
+
+    static struct Baz
+    {
+        this()(int x) const {}
+    }
+    auto h1 = new const(Baz)(1);
+    auto h2 = new immutable(Baz)(1);
+    auto h3 = new shared(Baz)(1);
+    auto h4 = const(Baz)(1);
+    auto h5 = immutable(Baz)(1);
+    auto h6 = shared(Baz)(1);
+    static assert(is(typeof(h1) == const(Baz)*));
+    static assert(is(typeof(h2) == immutable(Baz)*));
+    static assert(is(typeof(h3) == shared(const(Baz))*));
+    static assert(is(typeof(h4) == const(Baz)));
+    static assert(is(typeof(h5) == immutable(Baz)));
+    static assert(is(typeof(h6) == shared(const(Baz))));
+}
+
+/***************************************************/
 // 6630
 
 void test6630()
@@ -4240,6 +4358,37 @@ void test5696()
         assert(fn(i) == i);
     }
 }
+
+/***************************************************/
+// 5933
+
+int dummyfunc5933();
+alias typeof(dummyfunc5933) FuncType5933;
+
+struct S5933a { auto x() { return 0; } }
+static assert(is(typeof(&S5933a.init.x) == int delegate()));
+
+struct S5933b { auto x() { return 0; } }
+static assert(is(typeof(S5933b.init.x) == FuncType5933));
+
+struct S5933c { auto x() { return 0; } }
+static assert(is(typeof(&S5933c.x) == int function()));
+
+struct S5933d { auto x() { return 0; } }
+static assert(is(typeof(S5933d.x) == FuncType5933));
+
+
+class C5933a { auto x() { return 0; } }
+static assert(is(typeof(&(new C5933b()).x) == int delegate()));
+
+class C5933b { auto x() { return 0; } }
+static assert(is(typeof((new C5933b()).x) == FuncType5933));
+
+class C5933c { auto x() { return 0; } }
+static assert(is(typeof(&C5933c.x) == int function()));
+
+class C5933d { auto x() { return 0; } }
+static assert(is(typeof(C5933d.x) == FuncType5933));
 
 /***************************************************/
 // 6084
@@ -4761,7 +4910,7 @@ void test3091(inout int = 0)
 
 template Id6837(T)
 {
-	alias T Id6837;
+    alias T Id6837;
 }
 static assert(is(Id6837!(shared const int) == shared const int));
 static assert(is(Id6837!(shared inout int) == shared inout int));
@@ -4851,6 +5000,18 @@ void test7150()
 {
     auto a = A7150(5, 5); // Error: template instance constructtest.A.__ctor!(int) error instantiating
     assert(A7150.cnt == 2);
+}
+
+/***************************************************/
+// 7159
+
+class HomeController7159 {
+    void* foo() {
+        return cast(void*)&HomeController7159.displayDefault;
+    }
+    auto displayDefault() {
+        return 1;
+    }
 }
 
 /***************************************************/
@@ -4951,11 +5112,16 @@ class A158
 class B158 : A158
 {
     override void foo1() { }
-    override void foo2() { }
+    override void foo2() const { }
     override void foo3() { }
     override void foo4() { }
 }
 
+/***************************************************/
+// 9231
+
+class B9231 { void foo() inout pure {} }
+class D9231 : B9231 { override void foo() inout {} }
 
 /***************************************************/
 // 3282
@@ -4973,7 +5139,7 @@ class Derived3282 : Base3282
     {
         return "Derived.f()";
     }
-    override string f() const
+  /*override*/ string f() const
     {
         return "Derived.f() const";
     }
@@ -4999,7 +5165,7 @@ class C7534
 class D7534 : C7534
 {
     override int foo(){ return 2; }
-    override int foo() const { return 3; }
+  /*override*/ int foo() const { return 3; }
     // Error: D.foo multiple overrides of same function
 }
 void test7534()
@@ -5034,7 +5200,7 @@ class V7534
 class W7534 : V7534
 {
     override Y7534 foo(){ return new Y7534(1); }
-    override Y7534 foo() const { return new Y7534(2); }
+  /*override*/ Y7534 foo() const { return new Y7534(2); }
 }
 
 void test7534cov()
@@ -5328,6 +5494,12 @@ void test8064()
 }
 
 /***************************************************/
+// 8220
+
+void foo8220(int){}
+static assert(!__traits(compiles, foo8220(typeof(0)))); // fail
+
+/***************************************************/
 
 void func8105(in ref int x) { }
 
@@ -5596,6 +5768,32 @@ void test161()
 }
 
 /***************************************************/
+// 8819
+
+void test8819()
+{
+    void[0] sa0 = (void[0]).init;
+    assert(sa0.ptr is null);
+
+    void[1] sa1 = (void[1]).init;
+    assert((cast(ubyte*)sa1.ptr)[0] == 0);
+
+    void[4] sa4 = [cast(ubyte)1,cast(ubyte)2,cast(ubyte)3,cast(ubyte)4];
+    assert((cast(ubyte*)sa4.ptr)[0] == 1);
+    assert((cast(ubyte*)sa4.ptr)[1] == 2);
+    assert((cast(ubyte*)sa4.ptr)[2] == 3);
+    assert((cast(ubyte*)sa4.ptr)[3] == 4);
+
+    auto sa22 = (void[2][2]).init;
+    static assert(sa22.sizeof == ubyte.sizeof * 2 * 2);
+    ubyte[4]* psa22 = cast(ubyte[4]*)sa22.ptr;
+    assert((*psa22)[0] == 0);
+    assert((*psa22)[1] == 0);
+    assert((*psa22)[2] == 0);
+    assert((*psa22)[3] == 0);
+}
+
+/***************************************************/
 // 8897
 
 class C8897
@@ -5612,7 +5810,28 @@ template M8897 ( E ) { }
 void test8917()
 {
     int[3] a;
-    int[3] b = a[] + a[];
+    int[3] a2;
+    int[3] b = a[] + a2[];
+}
+
+/***************************************************/
+// 8945
+
+struct S8945 // or `class`, or `union`
+{
+    struct S0(T) { int i; }
+    struct S1(T) { this(int){} }
+}
+
+void test8945()
+{
+    auto cs0a = const S8945.S0!int();  // ok
+    auto cs0b = const S8945.S0!int(1); // ok
+    auto cs1  = const S8945.S1!int(1); // ok
+
+    auto s0a = S8945.S0!int();  // Error: struct S0 does not overload ()
+    auto s0b = S8945.S0!int(1); // Error: struct S0 does not overload ()
+    auto s1  = S8945.S1!int(1); // Error: struct S1 does not overload ()
 }
 
 /***************************************************/
@@ -5621,17 +5840,17 @@ struct S162
 {
     static int generateMethodStubs( Class )()
     {
-	int text;
+        int text;
 
-	foreach( m; __traits( allMembers, Class ) )
-	{
-	    static if( is( typeof( mixin( m ) ) ) && is( typeof( mixin( m ) ) == function ) )
-	    {
-		pragma(msg, __traits( getOverloads, Class, m ));
-	    }
-	}
+        foreach( m; __traits( allMembers, Class ) )
+        {
+            static if( is( typeof( mixin( m ) ) ) && is( typeof( mixin( m ) ) == function ) )
+            {
+                pragma(msg, __traits( getOverloads, Class, m ));
+            }
+        }
 
-	return text;
+        return text;
     }
 
     enum int ttt = generateMethodStubs!( S162 )();
@@ -5694,10 +5913,10 @@ mixin template DefineCoreType(string type)
 
         static void instance()
         {
-	    x = 3;
+            x = 3;
         }
 
-	X164!() xxx;
+        X164!() xxx;
     }
 }
 
@@ -5716,6 +5935,101 @@ struct X164()
     mixin A164!();
 }
 
+
+/***************************************************/
+// 9428
+
+void test9428()
+{
+    int[2][] items = [[1, 2]];
+    int[2] x = [3, 4];
+
+    auto r1 = items ~ [x];
+    assert(r1.length == 2);
+    assert(r1[0][0] == 1);
+    assert(r1[0][1] == 2);
+    assert(r1[1][0] == 3);
+    assert(r1[1][1] == 4);
+
+    auto r2 = items ~ x;
+    assert(r2.length == 2);
+    assert(r2[0][0] == 1);
+    assert(r2[0][1] == 2);
+    assert(r2[1][0] == 3);
+    assert(r2[1][1] == 4);
+
+    auto r3 = [x] ~ items;
+    assert(r3.length == 2);
+    assert(r3[0][0] == 3);
+    assert(r3[0][1] == 4);
+    assert(r3[1][0] == 1);
+    assert(r3[1][1] == 2);
+
+    auto r4 = x ~ items;
+    assert(r4.length == 2);
+    assert(r4[0][0] == 3);
+    assert(r4[0][1] == 4);
+    assert(r4[1][0] == 1);
+    assert(r4[1][1] == 2);
+}
+
+/***************************************************/
+// 9504
+
+struct Bar9504
+{
+    template Abc(T)
+    {
+        T y;
+    }
+
+    enum size_t num = 123;
+
+    class Def {}
+}
+
+template GetSym9504(alias sym) { static assert(__traits(isSame, sym, Bar9504.Abc)); }
+template GetExp9504(size_t n) { static assert(n == Bar9504.num); }
+template GetTyp9504(T) { static assert(is(T == Bar9504.Def)); }
+
+alias GetSym9504!(typeof(Bar9504.init).Abc) X9504; // NG
+alias GetExp9504!(typeof(Bar9504.init).num) Y9504; // NG
+alias GetTyp9504!(typeof(Bar9504.init).Def) Z9504;
+
+Bar9504 test9504()
+{
+    alias GetSym9504!(typeof(return).Abc) V9504; // NG
+    alias GetExp9504!(typeof(return).num) W9504; // NG
+    alias GetTyp9504!(typeof(return).Def) X9504;
+    return Bar9504();
+}
+
+/***************************************************/
+// 9538
+
+void test9538()
+{
+    void*[1] x;
+    auto ti = typeid(x.ptr);
+}
+
+/***************************************************/
+// 9539
+
+void test9539()
+{
+    void f(int** ptr)
+    {
+        assert(**ptr == 10);
+    }
+    int* p = new int;
+    *p = 10;
+    int*[1] x = [p];
+    f(&x[0]);
+
+    int*[] arr = [null];
+    static assert(!__traits(compiles, p = arr));    // bad!
+}
 
 /***************************************************/
 
@@ -5813,6 +6127,7 @@ int main()
     test8442();
     test86();
     test87();
+    test2486();
     test5554();
     test88();
     test7545();
@@ -5971,8 +6286,12 @@ int main()
     test6141();
     test8526();
     test161();
+    test8819();
     test8917();
+    test8945();
     test163();
+    test9428();
+    test9538();
 
     printf("Success\n");
     return 0;

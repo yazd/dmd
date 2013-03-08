@@ -13,6 +13,7 @@
 #include <assert.h>
 
 #include "rmem.h"
+#include "target.h"
 
 #include "statement.h"
 #include "expression.h"
@@ -710,9 +711,9 @@ int CompoundStatement::blockExit(bool mustNotThrow)
                     // Allow if last case/default was empty
                     CaseStatement *sc = slast->isCaseStatement();
                     DefaultStatement *sd = slast->isDefaultStatement();
-                    if (sc && sc->statement->isEmpty())
+                    if (sc && (sc->statement->isEmpty() || sc->statement->isCaseStatement()))
                         ;
-                    else if (sd && sd->statement->isEmpty())
+                    else if (sd && (sd->statement->isEmpty() || sd->statement->isCaseStatement()))
                         ;
                     else
                         s->error("switch case fallthrough - use 'goto %s;' if intended",
@@ -1793,7 +1794,9 @@ Lagain:
                     {
                         /* Reference to immutable data should be marked as const
                          */
-                        if (!tn->isMutable())
+                        if (aggr->checkModifiable(sc, 1) == 2)
+                            var->storage_class |= STCctorinit;
+                        else if (!tn->isMutable())
                             var->storage_class |= STCconst;
 
                         Type *t = tab->nextOf();
@@ -1871,11 +1874,7 @@ Lagain:
                 {
                     ExpInitializer *ie = new ExpInitializer(loc, new IdentifierExp(loc, key->ident));
                     VarDeclaration *v = new VarDeclaration(loc, arg->type, arg->ident, ie);
-#if (BUG6652 == 1 || BUG6652 == 2)
-                    v->storage_class |= STCforeach | STCref | (arg->storageClass & STCref ? 0 : STCbug6652);
-#else
                     v->storage_class |= STCforeach | (arg->storageClass & STCref);
-#endif
                     body = new CompoundStatement(loc, new ExpStatement(loc, v), body);
                 }
             }
@@ -1928,18 +1927,12 @@ Lagain:
                 error("only one or two arguments for associative array foreach");
                 break;
             }
-#if SARRAYVALUE
+
             /* This only works if Key or Value is a static array.
              */
             tab = taa->getImpl()->type;
             goto Lagain;
-#else
-            if (op == TOKforeach_reverse)
-            {
-                error("no reverse iteration on associative arrays");
-            }
-            goto Lapply;
-#endif
+
         case Tclass:
         case Tstruct:
 #if DMDV2
@@ -2204,7 +2197,7 @@ Lagain:
                 Expressions *exps = new Expressions();
                 exps->push(aggr);
                 size_t keysize = taa->index->size();
-                keysize = (keysize + ((size_t)PTRSIZE-1)) & ~((size_t)PTRSIZE-1);
+                keysize = (keysize + ((size_t)Target::ptrsize-1)) & ~((size_t)Target::ptrsize-1);
                 exps->push(new IntegerExp(0, keysize, Type::tsize_t));
                 exps->push(flde);
                 e = new CallExp(loc, ec, exps);
@@ -2567,11 +2560,7 @@ Statement *ForeachRangeStatement::semantic(Scope *sc)
     {
         ie = new ExpInitializer(loc, new IdentifierExp(loc, key->ident));
         VarDeclaration *v = new VarDeclaration(loc, arg->type, arg->ident, ie);
-#if (BUG6652 == 1 || BUG6652 == 2)
-        v->storage_class |= STCforeach | STCref | (arg->storageClass & STCref ? 0 : STCbug6652);
-#else
         v->storage_class |= STCforeach | (arg->storageClass & STCref);
-#endif
         body = new CompoundStatement(loc, new ExpStatement(loc, v), body);
     }
     if (arg->storageClass & STCref)
@@ -3236,14 +3225,18 @@ Statement *SwitchStatement::semantic(Scope *sc)
 #if DMDV2
     if (isFinal)
     {   Type *t = condition->type;
-        while (t->ty == Ttypedef)
+        while (t && t->ty == Ttypedef)
         {   // Don't use toBasetype() because that will skip past enums
             t = ((TypeTypedef *)t)->sym->basetype;
         }
-        if (te)
+        Dsymbol *ds;
+        EnumDeclaration *ed = NULL;
+        if (t && ((ds = t->toDsymbol(sc)) != NULL))
+            ed = ds->isEnumDeclaration();  // typedef'ed enum
+        if (!ed && te && ((ds = te->toDsymbol(sc)) != NULL))
+            ed = ds->isEnumDeclaration();
+        if (ed)
         {
-            EnumDeclaration *ed = te->toDsymbol(sc)->isEnumDeclaration();
-            assert(ed);
             size_t dim = ed->members->dim;
             for (size_t i = 0; i < dim; i++)
             {
@@ -3402,7 +3395,7 @@ Statement *CaseStatement::semantic(Scope *sc)
         if (exp->op != TOKstring && exp->op != TOKint64 && exp->op != TOKerror)
         {
             error("case must be a string or an integral constant, not %s", exp->toChars());
-            exp = new IntegerExp(0);
+            exp = new ErrorExp();
         }
 
     L1:
@@ -3873,7 +3866,7 @@ Statement *ReturnStatement::semantic(Scope *sc)
                             tf->next = exp->type;
                         else if (m1 && !m2)
                             ;
-                        else
+                        else if (exp->op != TOKerror)
                             error("mismatched function return type inference of %s and %s",
                                 exp->type->toChars(), tfret->toChars());
                     }
@@ -3922,14 +3915,13 @@ Statement *ReturnStatement::semantic(Scope *sc)
         }
         else if (tbret->ty != Tvoid)
         {
-            assert(fd->type->ty == Tfunction);
-            TypeFunction *tf = (TypeFunction *)fd->type;
-            if (fd->isPureBypassingInference() != PUREimpure &&
-                !tf->hasMutableIndirectionParams() &&
-                !exp->type->implicitConvTo(tret) &&
-                exp->type->invariantOf()->implicitConvTo(tret))
+            if (!exp->type->implicitConvTo(tret) &&
+                fd->parametersIntersect(exp->type))
             {
-                exp = exp->castTo(sc, exp->type->invariantOf());
+                if (exp->type->invariantOf()->implicitConvTo(tret))
+                    exp = exp->castTo(sc, exp->type->invariantOf());
+                else if (exp->type->wildOf()->implicitConvTo(tret))
+                    exp = exp->castTo(sc, exp->type->wildOf());
             }
             if (fd->tintro)
                 exp = exp->implicitCastTo(sc, fd->type->nextOf());
@@ -4400,7 +4392,7 @@ Statement *SynchronizedStatement::semantic(Scope *sc)
          *  try { body } finally { _d_criticalexit(critsec.ptr); }
          */
         Identifier *id = Lexer::uniqueId("__critsec");
-        Type *t = new TypeSArray(Type::tint8, new IntegerExp(PTRSIZE + (global.params.is64bit ? os_critsecsize64() : os_critsecsize32())));
+        Type *t = new TypeSArray(Type::tint8, new IntegerExp(Target::ptrsize + (global.params.is64bit ? os_critsecsize64() : os_critsecsize32())));
         VarDeclaration *tmp = new VarDeclaration(loc, t, id, NULL);
         tmp->storage_class |= STCgshared | STCstatic;
 

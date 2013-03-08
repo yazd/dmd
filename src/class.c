@@ -15,6 +15,7 @@
 
 #include "root.h"
 #include "rmem.h"
+#include "target.h"
 
 #include "enum.h"
 #include "init.h"
@@ -605,14 +606,13 @@ void ClassDeclaration::semantic(Scope *sc)
 
     if (isCOMclass())
     {
-#if _WIN32
-        sc->linkage = LINKwindows;
-#else
-        /* This enables us to use COM objects under Linux and
-         * work with things like XPCOM
-         */
-        sc->linkage = LINKc;
-#endif
+        if (global.params.isWindows)
+            sc->linkage = LINKwindows;
+        else
+            /* This enables us to use COM objects under Linux and
+             * work with things like XPCOM
+             */
+            sc->linkage = LINKc;
     }
     sc->protection = PROTpublic;
     sc->explicitProtection = 0;
@@ -621,11 +621,11 @@ void ClassDeclaration::semantic(Scope *sc)
     {   sc->offset = baseClass->structsize;
         alignsize = baseClass->alignsize;
 //      if (isnested)
-//          sc->offset += PTRSIZE;      // room for uplevel context pointer
+//          sc->offset += Target::ptrsize;      // room for uplevel context pointer
     }
     else
-    {   sc->offset = PTRSIZE * 2;       // allow room for __vptr and __monitor
-        alignsize = PTRSIZE;
+    {   sc->offset = Target::ptrsize * 2;       // allow room for __vptr and __monitor
+        alignsize = Target::ptrsize;
     }
     sc->userAttributes = NULL;
     structsize = sc->offset;
@@ -727,22 +727,28 @@ void ClassDeclaration::semantic(Scope *sc)
     aggNew    = (NewDeclaration *)search(0, Id::classNew, 0);
     aggDelete = (DeleteDeclaration *)search(0, Id::classDelete, 0);
 
-    // If this class has no constructor, but base class does, create
-    // a constructor:
+    // If this class has no constructor, but base class has a default
+    // ctor, create a constructor:
     //    this() { }
     if (!ctor && baseClass && baseClass->ctor)
     {
-        //printf("Creating default this(){} for class %s\n", toChars());
-        Type *tf = new TypeFunction(NULL, NULL, 0, LINKd, 0);
-        CtorDeclaration *ctor = new CtorDeclaration(loc, 0, 0, tf);
-        ctor->isImplicit = true;
-        ctor->fbody = new CompoundStatement(0, new Statements());
-        members->push(ctor);
-        ctor->addMember(sc, this, 1);
-        *sc = scsave;   // why? What about sc->nofree?
-        ctor->semantic(sc);
-        this->ctor = ctor;
-        defaultCtor = ctor;
+        if (baseClass->defaultCtor)
+        {
+            //printf("Creating default this(){} for class %s\n", toChars());
+            Type *tf = new TypeFunction(NULL, NULL, 0, LINKd, 0);
+            CtorDeclaration *ctor = new CtorDeclaration(loc, 0, 0, tf);
+            ctor->fbody = new CompoundStatement(0, new Statements());
+            members->push(ctor);
+            ctor->addMember(sc, this, 1);
+            *sc = scsave;   // why? What about sc->nofree?
+            ctor->semantic(sc);
+            this->ctor = ctor;
+            defaultCtor = ctor;
+        }
+        else
+        {
+            error("Cannot implicitly generate a default ctor when base class %s is missing a default ctor", baseClass->toPrettyChars());
+        }
     }
 
 #if 0
@@ -759,7 +765,7 @@ void ClassDeclaration::semantic(Scope *sc)
     for (size_t i = 0; i < vtblInterfaces->dim; i++)
     {
         BaseClass *b = (*vtblInterfaces)[i];
-        unsigned thissize = PTRSIZE;
+        unsigned thissize = Target::ptrsize;
 
         alignmember(STRUCTALIGN_DEFAULT, thissize, &sc->offset);
         assert(b->offset == 0);
@@ -783,27 +789,11 @@ void ClassDeclaration::semantic(Scope *sc)
     dtor = buildDtor(sc);
     if (Dsymbol *assign = search_function(this, Id::assign))
     {
-        Expression *e = new NullExp(loc, type); // dummy rvalue
-        Expressions *arguments = new Expressions();
-        arguments->push(e);
-
-        // check identity opAssign exists
-        FuncDeclaration *fd = assign->isFuncDeclaration();
-        if (fd)
-        {   fd = fd->overloadResolve(loc, e, arguments, 1);
-            if (fd && !(fd->storage_class & STCdisable))
-                goto Lassignerr;
+        if (FuncDeclaration *f = hasIdentityOpAssign(sc, assign))
+        {
+            if (!(f->storage_class & STCdisable))
+                error("identity assignment operator overload is illegal");
         }
-
-        if (TemplateDeclaration *td = assign->isTemplateDeclaration())
-        {   fd = td->deduceFunctionTemplate(sc, loc, NULL, e, arguments, 1+2);
-            if (fd && !(fd->storage_class & STCdisable))
-                goto Lassignerr;
-        }
-
-Lassignerr:
-        if (fd && !(fd->storage_class & STCdisable))
-            error("identity assignment operator overload is illegal");
     }
     sc->pop();
 
@@ -1440,7 +1430,7 @@ void InterfaceDeclaration::semantic(Scope *sc)
     sc->protection = PROTpublic;
     sc->explicitProtection = 0;
 //    structalign = sc->structalign;
-    sc->offset = PTRSIZE * 2;
+    sc->offset = Target::ptrsize * 2;
     sc->userAttributes = NULL;
     structsize = sc->offset;
     inuse++;
@@ -1653,6 +1643,7 @@ int BaseClass::fillVtbl(ClassDeclaration *cd, FuncDeclarations *vtbl, int newins
         assert(ifd);
         // Find corresponding function in this class
         tf = (ifd->type->ty == Tfunction) ? (TypeFunction *)(ifd->type) : NULL;
+        assert(tf);  // should always be non-null
         fd = cd->findFunc(ifd->ident, tf);
         if (fd && !fd->isAbstract())
         {
@@ -1676,8 +1667,10 @@ int BaseClass::fillVtbl(ClassDeclaration *cd, FuncDeclarations *vtbl, int newins
             //printf("            not found\n");
             // BUG: should mark this class as abstract?
             if (!cd->isAbstract())
-                cd->error("interface function %s.%s isn't implemented",
-                    id->toChars(), ifd->ident->toChars());
+                cd->error("interface function %s.%s%s isn't implemented",
+                    id->toChars(), ifd->ident->toChars(),
+                    Parameter::argsTypesToChars(tf->parameters, tf->varargs));
+
             fd = NULL;
         }
         if (vtbl)

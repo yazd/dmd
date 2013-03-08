@@ -1,6 +1,6 @@
 
 // Compiler implementation of the D programming language
-// Copyright (c) 1999-2012 by Digital Mars
+// Copyright (c) 1999-2013 by Digital Mars
 // All Rights Reserved
 // written by Walter Bright
 // http://www.digitalmars.com
@@ -18,10 +18,7 @@
 
 #include "rmem.h"
 #include "root.h"
-
-#if linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
-#include "gnuc.h"
-#endif
+#include "port.h"
 
 #include "mars.h"
 #include "dsymbol.h"
@@ -30,6 +27,7 @@
 #include "lexer.h"
 #include "aggregate.h"
 #include "declaration.h"
+#include "statement.h"
 #include "enum.h"
 #include "id.h"
 #include "module.h"
@@ -43,7 +41,7 @@ struct Escape
 {
     const char *strings[256];
 
-    static const char *escapeChar(unsigned c);
+    const char *escapeChar(unsigned c);
 };
 
 struct Section
@@ -108,9 +106,10 @@ Parameter *isFunctionParameter(Dsymbol *s, unsigned char *p, size_t len);
 
 int isIdStart(unsigned char *p);
 int isIdTail(unsigned char *p);
+int isIndentWS(unsigned char *p);
 int utfStride(unsigned char *p);
 
-static unsigned char ddoc_default[] = "\
+static const char ddoc_default[] = "\
 DDOC =  <html><head>\n\
         <META http-equiv=\"content-type\" content=\"text/html; charset=utf-8\">\n\
         <title>$(TITLE)</title>\n\
@@ -201,11 +200,11 @@ ESCAPES = /</&lt;/\n\
           /&/&amp;/\n\
 ";
 
-static char ddoc_decl_s[] = "$(DDOC_DECL ";
-static char ddoc_decl_e[] = ")\n";
+static const char ddoc_decl_s[] = "$(DDOC_DECL ";
+static const char ddoc_decl_e[] = ")\n";
 
-static char ddoc_decl_dd_s[] = "$(DDOC_DECL_DD ";
-static char ddoc_decl_dd_e[] = ")\n";
+static const char ddoc_decl_dd_s[] = "$(DDOC_DECL_DD ";
+static const char ddoc_decl_dd_e[] = ")\n";
 
 
 /****************************************************
@@ -290,7 +289,7 @@ void Module::gendocfile()
             dc->macros->write(dc, sc, this, sc->docbuf);
         }
         sc->docbuf->write(comment, commentlen);
-        highlightText(NULL, this, sc->docbuf, 0);
+        highlightText(sc, this, sc->docbuf, 0);
     }
     else
     {
@@ -341,10 +340,7 @@ void Module::gendocfile()
     assert(docfile);
     docfile->setbuffer(buf.data, buf.offset);
     docfile->ref = 1;
-    char *pt = FileName::path(docfile->toChars());
-    if (*pt)
-        FileName::ensurePathExists(pt);
-    mem.free(pt);
+    FileName::ensurePathToNameExists(docfile->toChars());
     docfile->writev();
 #else
     /* Remove all the escape sequences from buf2
@@ -367,10 +363,7 @@ void Module::gendocfile()
     // Transfer image to file
     docfile->setbuffer(buf2.data, buf2.offset);
     docfile->ref = 1;
-    char *pt = FileName::path(docfile->toChars());
-    if (*pt)
-        FileName::ensurePathExists(pt);
-    mem.free(pt);
+    FileName::ensurePathToNameExists(docfile->toChars());
     docfile->writev();
 #endif
 }
@@ -513,6 +506,41 @@ void Dsymbol::emitDitto(Scope *sc)
     buf->spread(sc->lastoffset, b.offset);
     memcpy(buf->data + sc->lastoffset, b.data, b.offset);
     sc->lastoffset += b.offset;
+}
+
+void emitUnittestComment(Scope *sc, Dsymbol *s, UnitTestDeclaration *test)
+{
+    static char pre[] = "$(D_CODE \n";
+    OutBuffer *buf = sc->docbuf;
+
+    bool exampleFound = false;
+    for (UnitTestDeclaration *utd = test; utd; utd = utd->unittest)
+    {
+        if (utd->protection == PROTprivate || !utd->comment || !utd->fbody)
+            continue;
+
+        OutBuffer codebuf;
+        const char *body = utd->fbody->toChars();
+        if (strlen(body))
+        {
+            if (!exampleFound)
+            {
+                exampleFound = true;
+                buf->writestring("$(DDOC_SECTION ");
+                buf->writestring("$(B Example:)");
+            }
+
+            codebuf.writestring(pre);
+            codebuf.writestring(body);
+            codebuf.writestring(")");
+            codebuf.writeByte(0);
+            highlightCode2(sc, s, &codebuf, 0);
+            buf->writestring(codebuf.toChars());
+        }
+    }
+
+    if (exampleFound)
+        buf->writestring(")");
 }
 
 void ScopeDsymbol::emitMemberComments(Scope *sc)
@@ -989,7 +1017,7 @@ void FuncDeclaration::toDocBuffer(OutBuffer *buf, Scope *sc)
 
             declarationToDocBuffer(this, buf, td);
 
-            highlightCode(NULL, this, buf, o);
+            highlightCode(sc, this, buf, o);
         }
         else
         {
@@ -1037,7 +1065,7 @@ void StructDeclaration::toDocBuffer(OutBuffer *buf, Scope *sc)
             td->onemember == this)
         {   size_t o = buf->offset;
             td->toDocBuffer(buf, sc);
-            highlightCode(NULL, this, buf, o);
+            highlightCode(sc, this, buf, o);
         }
         else
         {
@@ -1063,7 +1091,7 @@ void ClassDeclaration::toDocBuffer(OutBuffer *buf, Scope *sc)
             td->onemember == this)
         {   size_t o = buf->offset;
             td->toDocBuffer(buf, sc);
-            highlightCode(NULL, this, buf, o);
+            highlightCode(sc, this, buf, o);
         }
         else
         {
@@ -1175,6 +1203,7 @@ void DocComment::parseSections(unsigned char *comment)
     p = comment;
     while (*p)
     {
+        unsigned char *pstart0 = p;
         p = skipwhitespace(p);
         pstart = p;
         pend = p;
@@ -1190,6 +1219,11 @@ void DocComment::parseSections(unsigned char *comment)
             // Check for start/end of a code section
             if (*p == '-')
             {
+                if (!inCode)
+                {   // restore leading indentation
+                    while (pstart0 < pstart && isIndentWS(pstart-1)) --pstart;
+                }
+
                 int numdash = 0;
                 while (*p == '-')
                 {
@@ -1299,6 +1333,8 @@ void DocComment::writeSections(Scope *sc, Dsymbol *s, OutBuffer *buf)
                 buf->writestring(")\n");
             }
         }
+        if (s->unittest)
+            emitUnittestComment(sc, s, s->unittest);
         buf->writestring(")\n");
     }
     else
@@ -1618,8 +1654,10 @@ void DocComment::parseEscapes(Escape **pescapetable, unsigned char *textstart, s
 
     if (!escapetable)
     {   escapetable = new Escape;
+        memset(escapetable, 0, sizeof(Escape));
         *pescapetable = escapetable;
     }
+    //printf("parseEscapes('%.*s') pescapetable = %p\n", textlen, textstart, pescapetable);
     unsigned char *p = textstart;
     unsigned char *pend = p + textlen;
 
@@ -1650,7 +1688,7 @@ void DocComment::parseEscapes(Escape **pescapetable, unsigned char *textstart, s
         char *s = (char *)memcpy(mem.malloc(len + 1), start, len);
         s[len] = 0;
         escapetable->strings[c] = s;
-        //printf("%c = '%s'\n", c, s);
+        //printf("\t%c = '%s'\n", c, s);
         p++;
     }
 }
@@ -1676,7 +1714,7 @@ int icmp(const char *stringz, void *s, size_t slen)
 
     if (len1 != slen)
         return len1 - slen;
-    return memicmp(stringz, (char *)s, slen);
+    return Port::memicmp(stringz, (char *)s, slen);
 }
 
 /*****************************************
@@ -1689,7 +1727,7 @@ int isDitto(unsigned char *comment)
     {
         unsigned char *p = skipwhitespace(comment);
 
-        if (memicmp((char *)p, "ditto", 5) == 0 && *skipwhitespace(p + 5) == 0)
+        if (Port::memicmp((char *)p, "ditto", 5) == 0 && *skipwhitespace(p + 5) == 0)
             return 1;
     }
     return 0;
@@ -1787,11 +1825,11 @@ size_t skippastURL(OutBuffer *buf, size_t i)
     size_t j;
     unsigned sawdot = 0;
 
-    if (length > 7 && memicmp((char *)p, "http://", 7) == 0)
+    if (length > 7 && Port::memicmp((char *)p, "http://", 7) == 0)
     {
         j = 7;
     }
-    else if (length > 8 && memicmp((char *)p, "https://", 8) == 0)
+    else if (length > 8 && Port::memicmp((char *)p, "https://", 8) == 0)
     {
         j = 8;
     }
@@ -1887,6 +1925,7 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
     int inCode = 0;
     //int inComment = 0;                  // in <!-- ... --> comment
     size_t iCodeStart;                    // start of code section
+    size_t codeIndent = 0;
 
     size_t iLineStart = offset;
 
@@ -1901,7 +1940,8 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
                 break;
 
             case '\n':
-                if (sc && !inCode && i == iLineStart && i + 1 < buf->offset)    // if "\n\n"
+                if (!sc->module->isDocFile &&
+                    !inCode && i == iLineStart && i + 1 < buf->offset)    // if "\n\n"
                 {
                     static char blankline[] = "$(DDOC_BLANKLINE)\n";
 
@@ -1916,48 +1956,53 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
                 if (inCode)
                     break;
                 p = &buf->data[i];
+                se = sc->module->escapetable->escapeChar('<');
 
-                // Skip over comments
-                if (p[1] == '!' && p[2] == '-' && p[3] == '-')
-                {   size_t j = i + 4;
-                    p += 4;
-                    while (1)
+                if (se && strcmp(se, "&lt;") == 0)
+                {
+                    // Generating HTML
+                    // Skip over comments
+                    if (p[1] == '!' && p[2] == '-' && p[3] == '-')
                     {
-                        if (j == buf->offset)
-                            goto L1;
-                        if (p[0] == '-' && p[1] == '-' && p[2] == '>')
+                        size_t j = i + 4;
+                        p += 4;
+                        while (1)
                         {
-                            i = j + 2;  // place on closing '>'
-                            break;
+                            if (j == buf->offset)
+                                goto L1;
+                            if (p[0] == '-' && p[1] == '-' && p[2] == '>')
+                            {
+                                i = j + 2;  // place on closing '>'
+                                break;
+                            }
+                            j++;
+                            p++;
                         }
-                        j++;
-                        p++;
+                        break;
                     }
-                    break;
-                }
 
-                // Skip over HTML tag
-                if (isalpha(p[1]) || (p[1] == '/' && isalpha(p[2])))
-                {   size_t j = i + 2;
-                    p += 2;
-                    while (1)
+                    // Skip over HTML tag
+                    if (isalpha(p[1]) || (p[1] == '/' && isalpha(p[2])))
                     {
-                        if (j == buf->offset)
-                            goto L1;
-                        if (p[0] == '>')
+                        size_t j = i + 2;
+                        p += 2;
+                        while (1)
                         {
-                            i = j;      // place on closing '>'
-                            break;
+                            if (j == buf->offset)
+                                break;
+                            if (p[0] == '>')
+                            {
+                                i = j;      // place on closing '>'
+                                break;
+                            }
+                            j++;
+                            p++;
                         }
-                        j++;
-                        p++;
+                        break;
                     }
-                    break;
                 }
-
             L1:
                 // Replace '<' with '&lt;' character entity
-                se = Escape::escapeChar('<');
                 if (se)
                 {   size_t len = strlen(se);
                     buf->remove(i, 1);
@@ -1971,7 +2016,7 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
                 if (inCode)
                     break;
                 // Replace '>' with '&gt;' character entity
-                se = Escape::escapeChar('>');
+                se = sc->module->escapetable->escapeChar('>');
                 if (se)
                 {   size_t len = strlen(se);
                     buf->remove(i, 1);
@@ -1988,7 +2033,7 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
                 if (p[1] == '#' || isalpha(p[1]))
                     break;                      // already a character entity
                 // Replace '&' with '&amp;' character entity
-                se = Escape::escapeChar('&');
+                se = sc->module->escapetable->escapeChar('&');
                 if (se)
                 {   size_t len = strlen(se);
                     buf->remove(i, 1);
@@ -2053,6 +2098,30 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
 
                         codebuf.write(buf->data + iCodeStart, i - iCodeStart);
                         codebuf.writeByte(0);
+
+                        // Remove leading indentations from all lines
+                        bool lineStart = true;
+                        unsigned char *endp = codebuf.data + codebuf.offset;
+                        for (unsigned char *p = codebuf.data; p < endp; )
+                        {
+                            if (lineStart)
+                            {
+                                size_t j = codeIndent;
+                                unsigned char *q = p;
+                                while (j-- > 0 && q < endp && isIndentWS(q))
+                                    ++q;
+                                codebuf.remove(p - codebuf.data, q - p);
+                                assert(codebuf.data <= p);
+                                assert(p < codebuf.data + codebuf.offset);
+                                lineStart = false;
+                                endp = codebuf.data + codebuf.offset; // update
+                                continue;
+                            }
+                            if (*p == '\n')
+                                lineStart = true;
+                            ++p;
+                        }
+
                         highlightCode2(sc, s, &codebuf, 0);
                         buf->remove(iCodeStart, i - iCodeStart);
                         i = buf->insert(iCodeStart, codebuf.data, codebuf.offset);
@@ -2063,6 +2132,7 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
                     {   static char pre[] = "$(D_CODE \n";
 
                         inCode = 1;
+                        codeIndent = istart - iLineStart;  // save indent count
                         i = buf->insert(i, pre, sizeof(pre) - 1);
                         iCodeStart = i;
                         i--;            // place i on >
@@ -2073,7 +2143,8 @@ void highlightText(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
 
             default:
                 leadingBlank = 0;
-                if (sc && !inCode && isIdStart(&buf->data[i]))
+                if (!sc->module->isDocFile &&
+                    !inCode && isIdStart(&buf->data[i]))
                 {
                     size_t j = skippastident(buf, i);
                     if (j > i)
@@ -2144,7 +2215,7 @@ void highlightCode(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset, bool an
     {   unsigned char c = buf->data[i];
         const char *se;
 
-        se = Escape::escapeChar(c);
+        se = sc->module->escapetable->escapeChar(c);
         if (se)
         {
             size_t len = strlen(se);
@@ -2180,10 +2251,10 @@ void highlightCode(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset, bool an
 /****************************************
  */
 
-void highlightCode3(OutBuffer *buf, unsigned char *p, unsigned char *pend)
+void highlightCode3(Scope *sc, OutBuffer *buf, unsigned char *p, unsigned char *pend)
 {
     for (; p < pend; p++)
-    {   const char *s = Escape::escapeChar(*p);
+    {   const char *s = sc->module->escapetable->escapeChar(*p);
         if (s)
             buf->writestring(s);
         else
@@ -2212,7 +2283,7 @@ void highlightCode2(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
     while (1)
     {
         lex.scan(&tok);
-        highlightCode3(&res, lastp, tok.ptr);
+        highlightCode3(sc, &res, lastp, tok.ptr);
         highlight = NULL;
         switch (tok.value)
         {
@@ -2250,7 +2321,7 @@ void highlightCode2(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
         }
         if (highlight)
             res.writestring(highlight);
-        highlightCode3(&res, tok.ptr, lex.p);
+        highlightCode3(sc, &res, tok.ptr, lex.p);
         if (highlight)
             res.writeByte(')');
         if (tok.value == TOKeof)
@@ -2267,8 +2338,13 @@ void highlightCode2(Scope *sc, Dsymbol *s, OutBuffer *buf, size_t offset)
  */
 
 const char *Escape::escapeChar(unsigned c)
-{   const char *s;
-
+{
+#if 1
+    assert(c < 256);
+    //printf("escapeChar('%c') => %p, %p\n", c, strings, strings[c]);
+    return strings[c];
+#else
+    const char *s;
     switch (c)
     {
         case '<':
@@ -2285,6 +2361,7 @@ const char *Escape::escapeChar(unsigned c)
             break;
     }
     return s;
+#endif
 }
 
 /****************************************
@@ -2323,6 +2400,15 @@ int isIdTail(unsigned char *p)
             return 1;
     }
     return 0;
+}
+
+/****************************************
+ * Determine if p points to the indentation space.
+ */
+
+int isIndentWS(unsigned char *p)
+{
+    return (*p == ' ') || (*p == '\t');
 }
 
 /*****************************************

@@ -39,22 +39,6 @@ Dsymbol::Dsymbol()
 {
     //printf("Dsymbol::Dsymbol(%p)\n", this);
     this->ident = NULL;
-    this->c_ident = NULL;
-    this->parent = NULL;
-    this->csym = NULL;
-    this->isym = NULL;
-    this->loc = 0;
-    this->comment = NULL;
-    this->scope = NULL;
-    this->errors = false;
-    this->userAttributes = NULL;
-}
-
-Dsymbol::Dsymbol(Identifier *ident)
-{
-    //printf("Dsymbol::Dsymbol(%p, ident)\n", this);
-    this->ident = ident;
-    this->c_ident = NULL;
     this->parent = NULL;
     this->csym = NULL;
     this->isym = NULL;
@@ -64,6 +48,23 @@ Dsymbol::Dsymbol(Identifier *ident)
     this->errors = false;
     this->depmsg = NULL;
     this->userAttributes = NULL;
+    this->unittest = NULL;
+}
+
+Dsymbol::Dsymbol(Identifier *ident)
+{
+    //printf("Dsymbol::Dsymbol(%p, ident)\n", this);
+    this->ident = ident;
+    this->parent = NULL;
+    this->csym = NULL;
+    this->isym = NULL;
+    this->loc = 0;
+    this->comment = NULL;
+    this->scope = NULL;
+    this->errors = false;
+    this->depmsg = NULL;
+    this->userAttributes = NULL;
+    this->unittest = NULL;
 }
 
 int Dsymbol::equals(Object *o)
@@ -259,6 +260,7 @@ Dsymbol *Dsymbol::pastMixin()
 /**********************************
  * Use this instead of toParent() when looking for the
  * 'this' pointer of the enclosing function/class.
+ * This skips over both TemplateInstance's and TemplateMixin's.
  */
 
 Dsymbol *Dsymbol::toParent2()
@@ -790,8 +792,8 @@ void Dsymbol::addComment(unsigned char *comment)
 /********************************* OverloadSet ****************************/
 
 #if DMDV2
-OverloadSet::OverloadSet()
-    : Dsymbol()
+OverloadSet::OverloadSet(Identifier *ident)
+    : Dsymbol(ident)
 {
 }
 
@@ -900,12 +902,20 @@ Dsymbol *ScopeDsymbol::search(Loc loc, Identifier *ident, int flags)
                          )
                        )
                     {
+                        /* Bugzilla 8668:
+                         * Public selective import adds AliasDeclaration in module.
+                         * To make an overload set, resolve aliases in here and
+                         * get actual overload roots which accessible via s and s2.
+                         */
+                        s = s->toAlias();
+                        s2 = s2->toAlias();
+
                         /* If both s2 and s are overloadable (though we only
                          * need to check s once)
                          */
                         if (s2->isOverloadable() && (a || s->isOverloadable()))
                         {   if (!a)
-                                a = new OverloadSet();
+                                a = new OverloadSet(s->ident);
                             /* Don't add to a[] if s2 is alias of previous sym
                              */
                             for (size_t j = 0; j < a->a.dim; j++)
@@ -1319,6 +1329,9 @@ Dsymbol *ArrayScopeSymbol::search(Loc loc, Identifier *ident, int flags)
              */
             return NULL;
 
+        while (ce->op == TOKcomma)
+            ce = ((CommaExp *)ce)->e2;
+
         /* If we are indexing into an array that is really a type
          * tuple, rewrite this as an index into a type tuple and
          * try again.
@@ -1369,6 +1382,29 @@ Dsymbol *ArrayScopeSymbol::search(Loc loc, Identifier *ident, int flags)
                     return NULL;
                 s = s->toAlias();
 
+                if (ce->hasSideEffect())
+                {
+                    /* Even if opDollar is needed, 'ce' should be evaluate only once. So
+                     * Rewrite:
+                     *      ce.opIndex( ... use of $ ... )
+                     *      ce.opSlice( ... use of $ ... )
+                     * as:
+                     *      (ref __dop = ce, __dop).opIndex( ... __dop.opDollar ...)
+                     *      (ref __dop = ce, __dop).opSlice( ... __dop.opDollar ...)
+                     */
+                    Identifier *id = Lexer::uniqueId("__dop");
+                    ExpInitializer *ei = new ExpInitializer(loc, ce);
+                    VarDeclaration *v = new VarDeclaration(loc, NULL, id, ei);
+                    v->storage_class |= STCctfe | STCforeach | STCref;
+                    DeclarationExp *de = new DeclarationExp(loc, v);
+                    VarExp *ve = new VarExp(loc, v);
+                    v->semantic(sc);
+                    de->type = ce->type;
+                    ve->type = ce->type;
+                    ((UnaExp *)exp)->e1 = new CommaExp(loc, de, ve);
+                    ce = ve;
+                }
+
                 Expression *e = NULL;
                 // Check for multi-dimensional opDollar(dim) template.
                 if (TemplateDeclaration *td = s->isTemplateDeclaration())
@@ -1377,14 +1413,11 @@ Dsymbol *ArrayScopeSymbol::search(Loc loc, Identifier *ident, int flags)
                     if (exp->op == TOKarray)
                     {
                         dim = ((ArrayExp *)exp)->currentDimension;
-                        e = ((ArrayExp *)exp)->e1;
                     }
                     else if (exp->op == TOKslice)
                     {
                         dim = 0; // slices are currently always one-dimensional
-                        e = ((SliceExp *)exp)->e1;
                     }
-                    assert(e);
 
                     Objects *tdargs = new Objects();
                     Expression *edim = new IntegerExp(0, dim, Type::tsize_t);
@@ -1394,7 +1427,7 @@ Dsymbol *ArrayScopeSymbol::search(Loc loc, Identifier *ident, int flags)
                     //TemplateInstance *ti = new TemplateInstance(loc, td, tdargs);
                     //ti->semantic(sc);
 
-                    e = new DotTemplateInstanceExp(loc, e, td->ident, tdargs);
+                    e = new DotTemplateInstanceExp(loc, ce, td->ident, tdargs);
                 }
                 else
                 {   /* opDollar exists, but it's not a template.

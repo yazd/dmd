@@ -569,6 +569,44 @@ void test7021()
 }
 
 /********************************************/
+// 8763
+
+void test8763()
+{
+    struct S
+    {
+        this(int) {}
+    }
+
+    void foo(T, Args...)(Args args)
+    {
+        T t = T(args);
+        // Error: constructor main.S.this (int) is not callable using argument types ()
+    }
+
+    S t = S(); // OK, initialize to S.init
+    foo!S();
+}
+
+/********************************************/
+// 8902
+
+union U8902 { int a, b; }
+
+enum U8902 u8902a = U8902.init; // No errors
+U8902 u8902b;                   // No errors
+U8902 u8902c = U8902.init;      // Error: duplicate union initialization for b
+
+void test8902()
+{
+    U8902 u8902d = U8902.init;                  // No errors
+    immutable U8902 u8902e = U8902.init;        // No errors
+    immutable static U8902 u8902f = U8902.init; // Error: duplicate union...
+    static U8902 u8902g = u8902e;               // Error: duplicate union...
+    static U8902 u8902h = U8902.init;           // Error: duplicate union...
+}
+
+/********************************************/
 // 9116
 
 void test9116()
@@ -615,6 +653,19 @@ void test9293()
 }
 
 /********************************************/
+// 9566
+
+void test9566()
+{
+    static struct ExpandData
+    {
+        ubyte[4096] window = 0;
+    }
+    ExpandData a;
+    auto b = ExpandData.init;   // bug
+}
+
+/********************************************/
 
 int main()
 {
@@ -638,8 +689,11 @@ int main()
     test6937();
     test7929();
     test7021();
+    test8763();
+    test8902();
     test9116();
     test9293();
+    test9566();
 
     printf("Success\n");
     return 0;

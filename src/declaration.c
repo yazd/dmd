@@ -19,6 +19,7 @@
 #include "scope.h"
 #include "aggregate.h"
 #include "module.h"
+#include "import.h"
 #include "id.h"
 #include "expression.h"
 #include "statement.h"
@@ -130,26 +131,30 @@ enum PROT Declaration::prot()
 
 #if DMDV2
 
-int Declaration::checkModify(Loc loc, Scope *sc, Type *t)
+int Declaration::checkModify(Loc loc, Scope *sc, Type *t, Expression *e1, int flag)
 {
+    VarDeclaration *v = isVarDeclaration();
+    if (v && v->canassign)
+        return 2;
+
     if ((sc->flags & SCOPEcontract) && isParameter())
-        error(loc, "cannot modify parameter '%s' in contract", toChars());
-
-    if ((sc->flags & SCOPEcontract) && isResult())
-        error(loc, "cannot modify result '%s' in contract", toChars());
-
-    if (isCtorinit() && !t->isMutable() ||
-        (storage_class & STCnodefaultctor))
-    {   // It's only modifiable if inside the right constructor
-        return modifyFieldVar(loc, sc, isVarDeclaration(), NULL);
-    }
-    else
     {
-        VarDeclaration *v = isVarDeclaration();
-        if (v && v->canassign)
-            return TRUE;
+        if (!flag) error(loc, "cannot modify parameter '%s' in contract", toChars());
+        return 0;
     }
-    return FALSE;
+    if ((sc->flags & SCOPEcontract) && isResult())
+    {
+        if (!flag) error(loc, "cannot modify result '%s' in contract", toChars());
+        return 0;
+    }
+
+    if (v && (isCtorinit() || isField()))
+    {   // It's only modifiable if inside the right constructor
+        if ((storage_class & (STCforeach | STCref)) == (STCforeach | STCref))
+            return 2;
+        return modifyFieldVar(loc, sc, v, e1) ? 2 : 1;
+    }
+    return 1;
 }
 #endif
 
@@ -410,6 +415,7 @@ AliasDeclaration::AliasDeclaration(Loc loc, Identifier *id, Type *type)
     this->loc = loc;
     this->type = type;
     this->aliassym = NULL;
+    this->import = NULL;
     this->htype = NULL;
     this->haliassym = NULL;
     this->overnext = NULL;
@@ -425,6 +431,7 @@ AliasDeclaration::AliasDeclaration(Loc loc, Identifier *id, Dsymbol *s)
     this->loc = loc;
     this->type = NULL;
     this->aliassym = s;
+    this->import = NULL;
     this->htype = NULL;
     this->haliassym = NULL;
     this->overnext = NULL;
@@ -669,6 +676,13 @@ Dsymbol *AliasDeclaration::toAlias()
     }
     else if (aliassym || type->deco)
         ;   // semantic is already done.
+    else if (import)
+    {
+        /* If this is an internal alias for selective import,
+         * resolve it under the correct scope.
+         */
+        import->semantic(NULL);
+    }
     else if (scope)
         semantic(scope);
     Dsymbol *s = aliassym ? aliassym->toAlias() : this;
@@ -864,7 +878,9 @@ void VarDeclaration::semantic(Scope *sc)
     else
     {   if (!originalType)
             originalType = type->syntaxCopy();
+        inuse++;
         type = type->semantic(loc, sc);
+        inuse--;
     }
     //printf(" semantic type = %s\n", type ? type->toChars() : "null");
 
@@ -954,7 +970,7 @@ void VarDeclaration::semantic(Scope *sc)
         size_t nelems = Parameter::dim(tt->arguments);
         Objects *exps = new Objects();
         exps->setDim(nelems);
-        Expression *ie = init ? init->toExpression() : NULL;
+        Expression *ie = (init && !init->isVoidInitializer()) ? init->toExpression() : NULL;
         if (ie) ie = ie->semantic(sc);
 
         if (nelems > 0 && ie)
@@ -1087,6 +1103,7 @@ Lnomatch:
             (*exps)[i] = e;
         }
         TupleDeclaration *v2 = new TupleDeclaration(loc, ident, exps);
+        v2->parent = this->parent;
         v2->isexp = 1;
         aliassym = v2;
         return;
@@ -1216,7 +1233,7 @@ Lnomatch:
         ((TypeStruct *)tb)->sym->noDefaultCtor)
     {
         if (!init)
-        {   if (storage_class & STCfield)
+        {   if (isField())
                 /* For fields, we'll check the constructor later to make sure it is initialized
                  */
                 storage_class |= STCnodefaultctor;
@@ -1749,7 +1766,7 @@ void VarDeclaration::setFieldOffset(AggregateDeclaration *ad, unsigned *poffset,
         return;
     }
 
-    if (!(storage_class & STCfield))
+    if (!isField())
         return;
     assert(!(storage_class & (STCstatic | STCextern | STCparameter | STCtls)));
 
@@ -1886,7 +1903,7 @@ AggregateDeclaration *VarDeclaration::isThis()
 int VarDeclaration::needThis()
 {
     //printf("VarDeclaration::needThis(%s, x%x)\n", toChars(), storage_class);
-    return storage_class & STCfield;
+    return isField();
 }
 
 int VarDeclaration::isImportedSymbol()
@@ -1900,7 +1917,7 @@ int VarDeclaration::isImportedSymbol()
 void VarDeclaration::checkCtorConstInit()
 {
 #if 0 /* doesn't work if more than one static ctor */
-    if (ctorinit == 0 && isCtorinit() && !(storage_class & STCfield))
+    if (ctorinit == 0 && isCtorinit() && !isField())
         error("missing initializer in static constructor for const variable");
 #endif
 }
@@ -1954,6 +1971,16 @@ void VarDeclaration::checkNestedReference(Scope *sc, Loc loc)
                     if (FuncLiteralDeclaration *fld = s->isFuncLiteralDeclaration())
                     {
                         fld->tok = TOKdelegate;
+
+                        /* This is necessary to avoid breaking tests for 8751 & 8793.
+                         * See: compilable/testInference.d
+                         */
+                        if (type->isMutable() ||                            // mutable variable
+                            !type->implicitConvTo(type->invariantOf()) ||   // has any mutable indirections
+                            !fdv->isPureBypassingInference())               // does not belong to pure function
+                        {
+                            fld->setImpure();   // Bugzilla 9415
+                        }
                     }
                 }
 
@@ -2035,7 +2062,7 @@ int VarDeclaration::canTakeAddressOf()
      */
     if ((isConst() || isImmutable()) &&
         storage_class & STCinit &&
-        (!(storage_class & (STCstatic | STCextern)) || (storage_class & STCfield)) &&
+        (!(storage_class & (STCstatic | STCextern)) || isField()) &&
         (!parent || toParent()->isModule() || toParent()->isTemplateInstance()) &&
         type->toBasetype()->isTypeBasic()
        )
