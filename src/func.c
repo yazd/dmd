@@ -26,6 +26,8 @@
 #include "hdrgen.h"
 #include "target.h"
 
+void functionToCBuffer2(TypeFunction *t, OutBuffer *buf, HdrGenState *hgs, int mod, const char *kind);
+
 /********************************* FuncDeclaration ****************************/
 
 FuncDeclaration::FuncDeclaration(Loc loc, Loc endloc, Identifier *id, StorageClass storage_class, Type *type)
@@ -295,7 +297,16 @@ void FuncDeclaration::semantic(Scope *sc)
         error("functions cannot be scope");
 
     if (isAbstract() && !isVirtual())
-        error("non-virtual functions cannot be abstract");
+    {
+        const char *sfunc;
+        if (isStatic())
+            sfunc = "static";
+        else if (protection == PROTprivate || protection == PROTpackage)
+            sfunc = Pprotectionnames[protection];
+        else
+            sfunc = "non-virtual";
+        error("%s functions cannot be abstract", sfunc);
+    }
 
     if (isOverride() && !isVirtual())
         error("cannot override a non-virtual function");
@@ -445,7 +456,7 @@ void FuncDeclaration::semantic(Scope *sc)
                 for (size_t i = 0; i < cd->baseClass->vtbl.dim; i++)
                 {
                     FuncDeclaration *f = cd->baseClass->vtbl[i]->isFuncDeclaration();
-                    if (f && !f->functionSemantic())
+                    if (f && f->ident == ident && !f->functionSemantic())
                         goto Ldone;
                 }
             }
@@ -2913,6 +2924,16 @@ const char *FuncDeclaration::toPrettyChars()
         return Dsymbol::toPrettyChars();
 }
 
+/** for diagnostics, e.g. 'int foo(int x, int y) pure' */
+const char *FuncDeclaration::toFullSignature()
+{
+    OutBuffer buf;
+    HdrGenState hgs;
+    functionToCBuffer2((TypeFunction *)type, &buf, &hgs, 0, toChars());
+    buf.writeByte(0);
+    return buf.extractData();
+}
+
 int FuncDeclaration::isMain()
 {
     return ident == Id::main &&
@@ -4408,9 +4429,10 @@ static Identifier *unitTestId(Loc loc)
 #undef snprintf
 #endif
 
-UnitTestDeclaration::UnitTestDeclaration(Loc loc, Loc endloc)
+UnitTestDeclaration::UnitTestDeclaration(Loc loc, Loc endloc, char *codedoc)
     : FuncDeclaration(loc, endloc, unitTestId(loc), STCundefined, NULL)
 {
+    this->codedoc = codedoc;
 }
 
 Dsymbol *UnitTestDeclaration::syntaxCopy(Dsymbol *s)
@@ -4418,13 +4440,15 @@ Dsymbol *UnitTestDeclaration::syntaxCopy(Dsymbol *s)
     UnitTestDeclaration *utd;
 
     assert(!s);
-    utd = new UnitTestDeclaration(loc, endloc);
+    utd = new UnitTestDeclaration(loc, endloc, codedoc);
     return FuncDeclaration::syntaxCopy(utd);
 }
 
 
 void UnitTestDeclaration::semantic(Scope *sc)
 {
+    protection = sc->protection;
+
     if (scope)
     {   sc = scope;
         scope = NULL;

@@ -1008,12 +1008,9 @@ MATCH SliceExp::implicitConvTo(Type *t)
         tb->ty == Tsarray && typeb->ty == Tarray &&
         lwr && upr)
     {
-        if (typeb->nextOf()->constConv(tb->nextOf()))
-        {
-            typeb = toStaticArrayType();
-            if (typeb)
-                result = typeb->implicitConvTo(t);
-        }
+        typeb = toStaticArrayType();
+        if (typeb)
+            result = typeb->implicitConvTo(t);
     }
     return result;
 }
@@ -2698,6 +2695,11 @@ Expression *BinExp::typeCombine(Scope *sc)
 
     if (!typeMerge(sc, this, &type, &e1, &e2))
         goto Lerror;
+    // If the types have no value, return an error
+    if (e1->op == TOKerror)
+        return e1;
+    if (e2->op == TOKerror)
+        return e2;
     return this;
 
 Lerror:

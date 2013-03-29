@@ -979,17 +979,17 @@ Dsymbol *ClassDeclaration::search(Loc loc, Identifier *ident, int flags)
     return s;
 }
 
-Dsymbol *ClassDeclaration::searchBase(Loc loc, Identifier *ident)
+ClassDeclaration *ClassDeclaration::searchBase(Loc loc, Identifier *ident)
 {
     // Search bases classes in depth-first, left to right order
 
     for (size_t i = 0; i < baseclasses->dim; i++)
     {
         BaseClass *b = (*baseclasses)[i];
-        Dsymbol *cdb = b->type->isClassHandle();
+        ClassDeclaration *cdb = b->type->isClassHandle();
         if (cdb->ident->equals(ident))
             return cdb;
-        cdb = ((ClassDeclaration *)cdb)->searchBase(loc, ident);
+        cdb = cdb->searchBase(loc, ident);
         if (cdb)
             return cdb;
     }
@@ -1656,8 +1656,7 @@ int BaseClass::fillVtbl(ClassDeclaration *cd, FuncDeclarations *vtbl, int newins
             if (newinstance &&
                 fd->toParent() != cd &&
                 ifd->toParent() == base)
-                cd->error("interface function %s.%s is not implemented",
-                    id->toChars(), ifd->ident->toChars());
+                cd->error("interface function '%s' is not implemented", ifd->toFullSignature());
 
             if (fd->toParent() == cd)
                 result = 1;
@@ -1667,9 +1666,7 @@ int BaseClass::fillVtbl(ClassDeclaration *cd, FuncDeclarations *vtbl, int newins
             //printf("            not found\n");
             // BUG: should mark this class as abstract?
             if (!cd->isAbstract())
-                cd->error("interface function %s.%s%s isn't implemented",
-                    id->toChars(), ifd->ident->toChars(),
-                    Parameter::argsTypesToChars(tf->parameters, tf->varargs));
+                cd->error("interface function '%s' is not implemented", ifd->toFullSignature());
 
             fd = NULL;
         }

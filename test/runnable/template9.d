@@ -2041,18 +2041,6 @@ void test9536()
     assert(s.bar() == 84);
 }
 
-/**********************************/
-// 9654
-
-void foo9654(ref const char[8] str) {}
-void bar9654(T)(ref const T[8] str) {}
-
-void test9654()
-{
-    foo9654("testinfo");
-    bar9654("testinfo");
-}
-
 /******************************************/
 
 int main()
@@ -2129,7 +2117,6 @@ int main()
     test9143();
     test9266();
     test9536();
-    test9654();
 
     printf("Success\n");
     return 0;

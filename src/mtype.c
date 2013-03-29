@@ -2759,41 +2759,8 @@ d_uns64 TypeBasic::size(Loc loc)
 }
 
 unsigned TypeBasic::alignsize()
-{   unsigned sz;
-
-    switch (ty)
-    {
-        case Tfloat80:
-        case Timaginary80:
-        case Tcomplex80:
-            sz = Target::realalignsize;
-            break;
-
-#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
-        case Tint64:
-        case Tuns64:
-            sz = global.params.is64bit ? 8 : 4;
-            break;
-
-        case Tfloat64:
-        case Timaginary64:
-            sz = global.params.is64bit ? 8 : 4;
-            break;
-
-        case Tcomplex32:
-            sz = 4;
-            break;
-
-        case Tcomplex64:
-            sz = global.params.is64bit ? 8 : 4;
-            break;
-#endif
-
-        default:
-            sz = size(0);
-            break;
-    }
-    return sz;
+{
+    return Target::alignsize(this);
 }
 
 
@@ -5981,13 +5948,19 @@ MATCH TypeFunction::callMatch(Expression *ethis, Expressions *args, int flag)
             {
                 if (arg->op == TOKstring && tprmb->ty == Tsarray)
                 {   if (targb->ty != Tsarray)
-                        targb = new TypeSArray(targb->nextOf(),
+                	{
+                        targb = new TypeSArray(tprmb->nextOf()->castMod(targb->nextOf()->mod),
                                 new IntegerExp(0, ((StringExp *)arg)->len,
                                 Type::tindex));
+                        targb = targb->semantic(0, NULL);
+                    }
                 }
                 else if (arg->op == TOKslice && tprmb->ty == Tsarray)
                 {   // Allow conversion from T[lwr .. upr] to ref T[upr-lwr]
-                    targb = tprmb;
+                    targb = new TypeSArray(targb->nextOf(),
+                            new IntegerExp(0, ((TypeSArray *)tprmb)->dim->toUInteger(),
+                            Type::tindex));
+                    targb = targb->semantic(0, NULL);
                 }
                 else
                     goto Nomatch;
@@ -7971,8 +7944,10 @@ L1:
     {   e->error("circular reference to '%s'", v->toPrettyChars());
         return new ErrorExp();
     }
-    if (v && !v->isDataseg())
+    if (v && !v->isDataseg() && (v->storage_class & STCmanifest))
     {
+        // Defer constant folding for the statically initialized
+        // const/immutable field until optimize-phase.
         Expression *ei = v->getConstInitializer();
         if (ei)
         {   e = ei->copy();     // need to copy it if it's a StringExp
@@ -8512,12 +8487,25 @@ L1:
         // See if it's 'this' class or a base class
         if (e->op != TOKtype)
         {
-            Dsymbol *cbase = sym->ident == ident ?
-                             sym : sym->searchBase(e->loc, ident);
+            if (sym->ident == ident)
+            {
+                e = new DotTypeExp(0, e, sym);
+                return e;
+            }
+            
+            ClassDeclaration *cbase = sym->searchBase(e->loc, ident);
             if (cbase)
             {
-                e = new DotTypeExp(0, e, cbase);
-                return e;
+                if (InterfaceDeclaration *ifbase = cbase->isInterfaceDeclaration())
+                {
+                    e = new CastExp(0, e, ifbase->type);
+                    return e;
+                }
+                else
+                {
+                    e = new DotTypeExp(0, e, cbase);
+                    return e;
+                }
             }
         }
 
@@ -8610,8 +8598,10 @@ L1:
     {   e->error("circular reference to '%s'", v->toPrettyChars());
         return new ErrorExp();
     }
-    if (v && !v->isDataseg())
+    if (v && !v->isDataseg() && (v->storage_class & STCmanifest))
     {
+        // Defer constant folding for the statically initialized
+        // const/immutable field until optimize-phase.
         Expression *ei = v->getConstInitializer();
         if (ei)
         {   e = ei->copy();     // need to copy it if it's a StringExp

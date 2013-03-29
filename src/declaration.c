@@ -1154,13 +1154,6 @@ Lnomatch:
         {
 #if DMDV2
             assert(!(storage_class & (STCextern | STCstatic | STCtls | STCgshared)));
-
-            if (storage_class & (STCconst | STCimmutable) && init)
-            {
-                if (!tb->isTypeBasic())
-                    storage_class |= STCstatic;
-            }
-            else
 #endif
             {
                 storage_class |= STCfield;
@@ -1270,7 +1263,7 @@ Lnomatch:
         error("manifest constants must have initializers");
 
     enum TOK op = TOKconstruct;
-    if (!init && !sc->inunion && !isStatic() && fd &&
+    if (!init && !sc->inunion && !(storage_class & (STCstatic | STCgshared | STCextern)) && fd &&
         (!(storage_class & (STCfield | STCin | STCforeach | STCparameter | STCresult))
          || (storage_class & STCout)) &&
         type->size() != 0)
@@ -1886,9 +1879,6 @@ AggregateDeclaration *VarDeclaration::isThis()
     if (!(storage_class & (STCstatic | STCextern | STCmanifest | STCtemplateparameter |
                            STCtls | STCgshared | STCctfe)))
     {
-        if ((storage_class & (STCconst | STCimmutable | STCwild)) && init)
-            return NULL;
-
         for (Dsymbol *s = this; s; s = s->parent)
         {
             ad = s->isMember();

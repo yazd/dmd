@@ -127,10 +127,6 @@ struct Declaration : Dsymbol
     enum LINK linkage;
     int inuse;                  // used to detect cycles
 
-#ifdef IN_GCC
-    Expressions *attributes;    // GCC decl/type attributes
-#endif
-
     enum Semantic sem;
 
     Declaration(Identifier *id);
@@ -665,6 +661,7 @@ struct FuncDeclaration : Declaration
     void appendState(Statement *s);
     char *mangle(bool isv = false);
     const char *toPrettyChars();
+    const char *toFullSignature();  // for diagnostics, e.g. 'int foo(int x, int y) pure'
     int isMain();
     int isWinMain();
     int isDllMain();
@@ -882,13 +879,15 @@ struct InvariantDeclaration : FuncDeclaration
 
 struct UnitTestDeclaration : FuncDeclaration
 {
-    UnitTestDeclaration(Loc loc, Loc endloc);
+    char *codedoc; /** For documented unittest. */
+    UnitTestDeclaration(Loc loc, Loc endloc, char *codedoc);
     Dsymbol *syntaxCopy(Dsymbol *);
     void semantic(Scope *sc);
     AggregateDeclaration *isThis();
     int isVirtual();
     int addPreInvariant();
     int addPostInvariant();
+    void emitComment(Scope *sc);
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
 
     UnitTestDeclaration *isUnitTestDeclaration() { return this; }
