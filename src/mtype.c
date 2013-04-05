@@ -309,6 +309,34 @@ Type *Type::trySemantic(Loc loc, Scope *sc)
 }
 
 /********************************
+ * Return a copy of this type with all attributes null-initialized.
+ * Useful for creating a type with different modifiers.
+ */
+
+Type *Type::nullAttributes()
+{
+    unsigned sz = sizeTy[ty];
+    Type *t = (Type *)mem.malloc(sz);
+    memcpy(t, this, sz);
+    // t->mod = NULL;  // leave mod unchanged
+    t->deco = NULL;
+    t->arrayof = NULL;
+    t->pto = NULL;
+    t->rto = NULL;
+    t->cto = NULL;
+    t->ito = NULL;
+    t->sto = NULL;
+    t->scto = NULL;
+    t->wto = NULL;
+    t->swto = NULL;
+    t->vtinfo = NULL;
+    t->ctype = NULL;
+    if (t->ty == Tstruct) ((TypeStruct *)t)->att = RECfwdref;
+    if (t->ty == Tclass) ((TypeClass *)t)->att = RECfwdref;
+    return t;
+}
+
+/********************************
  * Convert to 'const'.
  */
 
@@ -458,21 +486,9 @@ Type *Type::unSharedOf()
 
     if (!t)
     {
-        unsigned sz = sizeTy[ty];
-        t = (Type *)mem.malloc(sz);
-        memcpy(t, this, sz);
+        t = this->nullAttributes();
         t->mod = mod & ~MODshared;
-        t->deco = NULL;
-        t->arrayof = NULL;
-        t->pto = NULL;
-        t->rto = NULL;
-        t->cto = NULL;
-        t->ito = NULL;
-        t->sto = NULL;
-        t->scto = NULL;
-        t->wto = NULL;
-        t->swto = NULL;
-        t->vtinfo = NULL;
+        t->ctype = ctype;
         t = t->merge();
 
         t->fixTo(this);
@@ -866,161 +882,57 @@ void Type::check()
 Type *Type::makeConst()
 {
     //printf("Type::makeConst() %p, %s\n", this, toChars());
-    if (cto)
-        return cto;
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
+    if (cto) return cto;
+    Type *t = this->nullAttributes();
     t->mod = MODconst;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
     //printf("-Type::makeConst() %p, %s\n", t, toChars());
     return t;
 }
 
 Type *Type::makeInvariant()
 {
-    if (ito)
-        return ito;
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
+    if (ito) return ito;
+    Type *t = this->nullAttributes();
     t->mod = MODimmutable;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
     return t;
 }
 
 Type *Type::makeShared()
 {
-    if (sto)
-        return sto;
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
+    if (sto) return sto;
+    Type *t = this->nullAttributes();
     t->mod = MODshared;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
     return t;
 }
 
 Type *Type::makeSharedConst()
 {
-    if (scto)
-        return scto;
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
+    if (scto) return scto;
+    Type *t = this->nullAttributes();
     t->mod = MODshared | MODconst;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
     return t;
 }
 
 Type *Type::makeWild()
 {
-    if (wto)
-        return wto;
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
+    if (wto) return wto;
+    Type *t = this->nullAttributes();
     t->mod = MODwild;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
     return t;
 }
 
 Type *Type::makeSharedWild()
 {
-    if (swto)
-        return swto;
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
+    if (swto) return swto;
+    Type *t = this->nullAttributes();
     t->mod = MODshared | MODwild;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
     return t;
 }
 
 Type *Type::makeMutable()
 {
-    unsigned sz = sizeTy[ty];
-    Type *t = (Type *)mem.malloc(sz);
-    memcpy(t, this, sz);
-    t->mod =  mod & MODshared;
-    t->deco = NULL;
-    t->arrayof = NULL;
-    t->pto = NULL;
-    t->rto = NULL;
-    t->cto = NULL;
-    t->ito = NULL;
-    t->sto = NULL;
-    t->scto = NULL;
-    t->wto = NULL;
-    t->swto = NULL;
-    t->vtinfo = NULL;
-    t->ctype = NULL;
+    Type *t = this->nullAttributes();
+    t->mod = mod & MODshared;
     return t;
 }
 
@@ -1955,16 +1867,18 @@ Expression *Type::getProperty(Loc loc, Identifier *ident)
         }
     }
     else if (ident == Id::mangleof)
-    {   const char *s;
+    {
         if (!deco)
-        {   s = toChars();
-            error(loc, "forward reference of type %s.mangleof", s);
+        {
+            error(loc, "forward reference of type %s.mangleof", toChars());
+            e = new ErrorExp();
         }
         else
-            s = deco;
-        e = new StringExp(loc, (char *)s, strlen(s), 'c');
-        Scope sc;
-        e = e->semantic(&sc);
+        {
+            e = new StringExp(loc, (char *)deco, strlen(deco), 'c');
+            Scope sc;
+            e = e->semantic(&sc);
+        }
     }
     else if (ident == Id::stringof)
     {   char *s = toChars();
@@ -3500,21 +3414,19 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident)
 
     if (!n->isMutable())
         if (ident == Id::sort || ident == Id::reverse)
-            error(e->loc, "can only %s a mutable array", ident->toChars());
+        {   error(e->loc, "can only %s a mutable array", ident->toChars());
+            goto Lerror;
+        }
 
     if (ident == Id::reverse && (n->ty == Tchar || n->ty == Twchar))
     {
-        Expression *ec;
-        FuncDeclaration *fd;
-        Expressions *arguments;
-        const char *nm;
         static const char *name[2] = { "_adReverseChar", "_adReverseWchar" };
 
-        nm = name[n->ty == Twchar];
-        fd = FuncDeclaration::genCfunc(Type::tindex, nm);
-        ec = new VarExp(0, fd);
+        const char *nm = name[n->ty == Twchar];
+        FuncDeclaration *fd = FuncDeclaration::genCfunc(Type::tindex, nm);
+        Expression *ec = new VarExp(0, fd);
         e = e->castTo(sc, n->arrayOf());        // convert to dynamic array
-        arguments = new Expressions();
+        Expressions *arguments = new Expressions();
         arguments->push(e);
         e = new CallExp(e->loc, ec, arguments);
         e->type = next->arrayOf();
@@ -3560,16 +3472,20 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident)
         if (ident == Id::idup)
         {   Type *einv = next->invariantOf();
             if (next->implicitConvTo(einv) < MATCHconst)
-                error(e->loc, "cannot implicitly convert element type %s to immutable in %s.idup",
+            {   error(e->loc, "cannot implicitly convert element type %s to immutable in %s.idup",
                     next->toChars(), olde->toChars());
+                goto Lerror;
+            }
             e->type = einv->arrayOf();
         }
         else if (ident == Id::dup)
         {
             Type *emut = next->mutableOf();
             if (next->implicitConvTo(emut) < MATCHconst)
-                error(e->loc, "cannot implicitly convert element type %s to mutable in %s.dup",
+            {   error(e->loc, "cannot implicitly convert element type %s to mutable in %s.dup",
                     next->toChars(), olde->toChars());
+                goto Lerror;
+            }
             e->type = emut->arrayOf();
         }
         else
@@ -3598,6 +3514,9 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident)
     }
     e = e->semantic(sc);
     return e;
+
+Lerror:
+    return new ErrorExp();
 }
 
 
@@ -3642,7 +3561,7 @@ d_uns64 TypeSArray::size(Loc loc)
     return sz;
 
 Loverflow:
-    error(loc, "index %lld overflow for static array", sz);
+    error(loc, "index %lld overflow for static array", (long long)sz);
     return 1;
 }
 
@@ -3874,14 +3793,6 @@ Type *TypeSArray::semantic(Loc loc, Scope *sc)
             }
             Parameter *arg = (*tt->arguments)[(size_t)d];
             return arg->type->addMod(this->mod);
-        }
-        case Tstruct:
-        {   TypeStruct *ts = (TypeStruct *)tbn;
-            if (0 && ts->sym->isnested)
-            {   error(loc, "cannot have static array of inner struct %s", ts->toChars());
-                goto Lerror;
-            }
-            break;
         }
         case Tfunction:
         case Tnone:
@@ -4171,17 +4082,11 @@ Type *TypeDArray::semantic(Loc loc, Scope *sc)
             error(loc, "can't have array of %s", tbn->toChars());
         case Terror:
             return Type::terror;
-
-        case Tstruct:
-        {   TypeStruct *ts = (TypeStruct *)tbn;
-            if (0 && ts->sym->isnested)
-                error(loc, "cannot have dynamic array of inner struct %s", ts->toChars());
-            break;
-        }
     }
     if (tn->isscope())
-        error(loc, "cannot have array of scope %s", tn->toChars());
-
+    {   error(loc, "cannot have array of scope %s", tn->toChars());
+        return Type::terror;
+    }
     next = tn;
     transitive();
     return merge();
@@ -5948,7 +5853,7 @@ MATCH TypeFunction::callMatch(Expression *ethis, Expressions *args, int flag)
             {
                 if (arg->op == TOKstring && tprmb->ty == Tsarray)
                 {   if (targb->ty != Tsarray)
-                	{
+                        {
                         targb = new TypeSArray(tprmb->nextOf()->castMod(targb->nextOf()->mod),
                                 new IntegerExp(0, ((StringExp *)arg)->len,
                                 Type::tindex));
@@ -6127,7 +6032,7 @@ bool TypeFunction::parameterEscapes(Parameter *p)
     if (!nextOf())
         return TRUE;
 
-    if (purity)
+    if (purity > PUREweak)
     {   /* With pure functions, we need only be concerned if p escapes
          * via any return statement.
          */
@@ -6715,7 +6620,9 @@ Type *TypeIdentifier::semantic(Loc loc, Scope *sc)
         {   TypeTypedef *tt = (TypeTypedef *)t;
 
             if (tt->sym->sem == SemanticIn)
-                error(loc, "circular reference of typedef %s", tt->toChars());
+            {   error(loc, "circular reference of typedef %s", tt->toChars());
+                return terror;
+            }
         }
         t = t->addMod(mod);
     }
@@ -6849,11 +6756,23 @@ Type *TypeInstance::semantic(Loc loc, Scope *sc)
         }
     }
     else
+    {
+        unsigned errors = global.errors;
         resolve(loc, sc, &e, &t, &s);
+        // if we had an error evaluating the symbol, suppress further errors
+        if (!t && errors != global.errors)
+            return terror;
+    }
 
     if (!t)
     {
-        error(loc, "%s is used as a type", toChars());
+        if (!e && s && s->errors)
+        {   // if there was an error evaluating the symbol, it might actually
+            // be a type. Avoid misleading error messages.
+            error(loc, "%s had previous errors", toChars());
+        }
+        else
+            error(loc, "%s is used as a type", toChars());
         t = terror;
     }
     return t;
@@ -7283,7 +7202,7 @@ Type *TypeEnum::toBasetype()
     if (!sym->memtype)
     {
         error(sym->loc, "enum %s is forward referenced", sym->toChars());
-        return tint32;
+        return Type::terror;
     }
     return sym->memtype->toBasetype();
 }
@@ -7513,7 +7432,7 @@ Type *TypeTypedef::semantic(Loc loc, Scope *sc)
     //printf("TypeTypedef::semantic(%s), sem = %d\n", toChars(), sym->sem);
     int errors = global.errors;
     sym->semantic(sc);
-    if (errors != global.errors)
+    if (errors != global.errors || sym->errors || sym->basetype->ty == Terror)
         return terror;
     return merge();
 }
@@ -7878,27 +7797,24 @@ Expression *TypeStruct::dotExp(Scope *sc, Expression *e, Identifier *ident)
         Expressions *exps = new Expressions;
         exps->reserve(sym->fields.dim);
 
+        Expression *e0 = NULL;
         Expression *ev = e;
-        for (size_t i = 0; i < sym->fields.dim; i++)
-        {   VarDeclaration *v = sym->fields[i];
-            Expression *fe;
-            if (i == 0 && sc->func && sym->fields.dim > 1 &&
-                e->hasSideEffect())
-            {
-                Identifier *id = Lexer::uniqueId("__tup");
-                ExpInitializer *ei = new ExpInitializer(e->loc, e);
-                VarDeclaration *vd = new VarDeclaration(e->loc, NULL, id, ei);
-                vd->storage_class |= STCctfe | STCref | STCforeach;
+        if (sc->func && sym->fields.dim > 1 && e->hasSideEffect())
+        {
+            Identifier *id = Lexer::uniqueId("__tup");
+            ExpInitializer *ei = new ExpInitializer(e->loc, e);
+            VarDeclaration *vd = new VarDeclaration(e->loc, NULL, id, ei);
+            vd->storage_class |= STCctfe | STCref | STCforeach;
 
-                ev = new VarExp(e->loc, vd);
-                fe = new CommaExp(e->loc, new DeclarationExp(e->loc, vd), ev);
-                fe = new DotVarExp(e->loc, fe, v);
-            }
-            else
-                fe = new DotVarExp(ev->loc, ev, v);
-            exps->push(fe);
+            e0 = new DeclarationExp(e->loc, vd);
+            ev = new VarExp(e->loc, vd);
         }
-        e = new TupleExp(e->loc, exps);
+        for (size_t i = 0; i < sym->fields.dim; i++)
+        {
+            VarDeclaration *v = sym->fields[i];
+            exps->push(new DotVarExp(ev->loc, ev, v));
+        }
+        e = new TupleExp(e->loc, e0, exps);
         sc = sc->push();
         sc->noaccesscheck = 1;
         e = e->semantic(sc);
@@ -7948,11 +7864,12 @@ L1:
     {
         // Defer constant folding for the statically initialized
         // const/immutable field until optimize-phase.
-        Expression *ei = v->getConstInitializer();
+        Expression *ei = v->init->toExpression(v->type);
         if (ei)
-        {   e = ei->copy();     // need to copy it if it's a StringExp
-            e = e->semantic(sc);
-            return e;
+        {   ei = ei->copy();    // need to copy it if it's a StringExp
+            ei->loc = e->loc;   // for better error message
+            ei = ei->semantic(sc);
+            return ei;
         }
     }
 
@@ -8031,9 +7948,9 @@ L1:
         /* It's:
          *    Struct.d
          */
-        if (d->isTupleDeclaration())
+        if (TupleDeclaration *tup = d->isTupleDeclaration())
         {
-            e = new TupleExp(e->loc, d->isTupleDeclaration());
+            e = new TupleExp(e->loc, tup);
             e = e->semantic(sc);
             return e;
         }
@@ -8120,7 +8037,7 @@ Expression *TypeStruct::defaultInitLiteral(Loc loc)
     //if (sym->isNested())
     //    return defaultInit(loc);
     Expressions *structelems = new Expressions();
-    structelems->setDim(sym->fields.dim - sym->isnested);
+    structelems->setDim(sym->fields.dim - sym->isNested());
     unsigned offset = 0;
     for (size_t j = 0; j < structelems->dim; j++)
     {
@@ -8132,27 +8049,18 @@ Expression *TypeStruct::defaultInitLiteral(Loc loc)
         {   if (vd->init->isVoidInitializer())
                 e = NULL;
             else
-                e = vd->init->toExpression();
+            {
+                if (vd->scope)
+                {
+                    vd->inuse++;
+                    vd->init->semantic(vd->scope, vd->type, INITinterpret);
+                    vd->inuse--;
+                }
+                e = vd->init->toExpression(/*vd->type*/);
+            }
         }
         else
             e = vd->type->defaultInitLiteral(loc);
-        if (e && vd->scope)
-        {
-            e = e->semantic(vd->scope);
-
-            Type *telem = vd->type->addMod(this->mod);
-            Type *origType = telem;
-            while (!e->implicitConvTo(telem) && telem->toBasetype()->ty == Tsarray)
-            {   /* Static array initialization, as in:
-                 *  T[3][5] = e;
-                 */
-                telem = telem->toBasetype()->nextOf();
-            }
-            if (!e->implicitConvTo(telem))
-                telem = origType;  // restore type for better diagnostic
-
-            e = e->implicitCastTo(vd->scope, telem);
-        }
         offset = vd->offset + vd->type->size();
         (*structelems)[j] = e;
     }
@@ -8186,7 +8094,7 @@ int TypeStruct::needsDestruction()
 
 bool TypeStruct::needsNested()
 {
-    if (sym->isnested)
+    if (sym->isNested())
         return true;
 
     for (size_t i = 0; i < sym->fields.dim; i++)
@@ -8449,30 +8357,26 @@ Expression *TypeClass::dotExp(Scope *sc, Expression *e, Identifier *ident)
         Expressions *exps = new Expressions;
         exps->reserve(sym->fields.dim);
 
+        Expression *e0 = NULL;
         Expression *ev = e;
+        if (sc->func && sym->fields.dim > 1 && e->hasSideEffect())
+        {
+            Identifier *id = Lexer::uniqueId("__tup");
+            ExpInitializer *ei = new ExpInitializer(e->loc, e);
+            VarDeclaration *vd = new VarDeclaration(e->loc, NULL, id, ei);
+            vd->storage_class |= STCctfe | STCref | STCforeach;
+
+            e0 = new DeclarationExp(e->loc, vd);
+            ev = new VarExp(e->loc, vd);
+        }
         for (size_t i = 0; i < sym->fields.dim; i++)
         {   VarDeclaration *v = sym->fields[i];
             // Don't include hidden 'this' pointer
             if (v->isThisDeclaration())
                 continue;
-            Expression *fe;
-            if (i == 0 && sc->func && sym->fields.dim > 1 &&
-                e->hasSideEffect())
-            {
-                Identifier *id = Lexer::uniqueId("__tup");
-                ExpInitializer *ei = new ExpInitializer(e->loc, e);
-                VarDeclaration *vd = new VarDeclaration(e->loc, NULL, id, ei);
-                vd->storage_class |= STCctfe | STCref | STCforeach;
-
-                ev = new VarExp(e->loc, vd);
-                fe = new CommaExp(e->loc, new DeclarationExp(e->loc, vd), ev);
-                fe = new DotVarExp(e->loc, fe, v);
-            }
-            else
-                fe = new DotVarExp(e->loc, ev, v);
-            exps->push(fe);
+            exps->push(new DotVarExp(ev->loc, ev, v));
         }
-        e = new TupleExp(e->loc, exps);
+        e = new TupleExp(e->loc, e0, exps);
         sc = sc->push();
         sc->noaccesscheck = 1;
         e = e->semantic(sc);
@@ -8492,7 +8396,7 @@ L1:
                 e = new DotTypeExp(0, e, sym);
                 return e;
             }
-            
+
             ClassDeclaration *cbase = sym->searchBase(e->loc, ident);
             if (cbase)
             {
@@ -8602,11 +8506,12 @@ L1:
     {
         // Defer constant folding for the statically initialized
         // const/immutable field until optimize-phase.
-        Expression *ei = v->getConstInitializer();
+        Expression *ei = v->init->toExpression(v->type);
         if (ei)
-        {   e = ei->copy();     // need to copy it if it's a StringExp
-            e = e->semantic(sc);
-            return e;
+        {   ei = ei->copy();    // need to copy it if it's a StringExp
+            ei->loc = e->loc;   // for better error message
+            ei = ei->semantic(sc);
+            return ei;
         }
     }
 
@@ -8685,9 +8590,9 @@ L1:
         /* It's:
          *    Class.d
          */
-        if (d->isTupleDeclaration())
+        if (TupleDeclaration *tup = d->isTupleDeclaration())
         {
-            e = new TupleExp(e->loc, d->isTupleDeclaration());
+            e = new TupleExp(e->loc, tup);
             e = e->semantic(sc);
             return e;
         }

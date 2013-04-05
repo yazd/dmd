@@ -297,7 +297,7 @@ void ClassDeclaration::semantic(Scope *sc)
         scope = NULL;
     }
     unsigned dprogress_save = Module::dprogress;
-    int errors = global.gaggedErrors;
+    int errors = global.errors;
 
     if (sc->stc & STCdeprecated)
     {
@@ -505,6 +505,7 @@ void ClassDeclaration::semantic(Scope *sc)
         com = baseClass->isCOMclass();
         isscope = baseClass->isscope;
         vthis = baseClass->vthis;
+        enclosing = baseClass->enclosing;
         storage_class |= baseClass->storage_class & STC_TYPECTOR;
     }
     else
@@ -532,7 +533,6 @@ void ClassDeclaration::semantic(Scope *sc)
          */
         if (vthis)              // if inheriting from nested class
         {   // Use the base class's 'this' member
-            isnested = true;
             if (storage_class & STCstatic)
                 error("static class cannot inherit from nested class %s", baseClass->toChars());
             if (toParent2() != baseClass->toParent2() &&
@@ -553,41 +553,11 @@ void ClassDeclaration::semantic(Scope *sc)
                         baseClass->toChars(),
                         baseClass->toParent2()->toChars());
                 }
-                isnested = false;
+                enclosing = NULL;
             }
         }
-        else if (!(storage_class & STCstatic))
-        {   Dsymbol *s = toParent2();
-            if (s)
-            {
-                AggregateDeclaration *ad = s->isClassDeclaration();
-                FuncDeclaration *fd = s->isFuncDeclaration();
-
-
-                if (ad || fd)
-                {   isnested = true;
-                    Type *t;
-                    if (ad)
-                        t = ad->handle;
-                    else if (fd)
-                    {   AggregateDeclaration *ad2 = fd->isMember2();
-                        if (ad2)
-                            t = ad2->handle;
-                        else
-                        {
-                            t = Type::tvoidptr;
-                        }
-                    }
-                    else
-                        assert(0);
-                    if (t->ty == Tstruct)       // ref to struct
-                        t = Type::tvoidptr;
-                    assert(!vthis);
-                    vthis = new ThisDeclaration(loc, t);
-                    members->push(vthis);
-                }
-            }
-        }
+        else
+            makeNested();
     }
 
     if (storage_class & STCauto)
@@ -620,7 +590,7 @@ void ClassDeclaration::semantic(Scope *sc)
     if (baseClass)
     {   sc->offset = baseClass->structsize;
         alignsize = baseClass->alignsize;
-//      if (isnested)
+//      if (enclosing)
 //          sc->offset += Target::ptrsize;      // room for uplevel context pointer
     }
     else
@@ -667,8 +637,8 @@ void ClassDeclaration::semantic(Scope *sc)
     }
     sc->offset = structsize;
 
-    if (global.gag && global.gaggedErrors != errors)
-    {   // The type is no good, yet the error messages were gagged.
+    if (global.errors != errors)
+    {   // The type is no good.
         type = Type::terror;
     }
 
@@ -732,7 +702,7 @@ void ClassDeclaration::semantic(Scope *sc)
     //    this() { }
     if (!ctor && baseClass && baseClass->ctor)
     {
-        if (baseClass->defaultCtor)
+        if (resolveFuncCall(loc, sc, baseClass->ctor, NULL, NULL, NULL, 1))
         {
             //printf("Creating default this(){} for class %s\n", toChars());
             Type *tf = new TypeFunction(NULL, NULL, 0, LINKd, 0);
@@ -813,6 +783,15 @@ void ClassDeclaration::semantic(Scope *sc)
         deferred->semantic2(sc);
         deferred->semantic3(sc);
     }
+
+#if 0
+    if (type->ty == Tclass && ((TypeClass *)type)->sym != this)
+    {
+        printf("this = %p %s\n", this, this->toChars());
+        printf("type = %d sym = %p\n", type->ty, ((TypeClass *)type)->sym);
+    }
+#endif
+    assert(type->ty != Tclass || ((TypeClass *)type)->sym == this);
 }
 
 void ClassDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
@@ -1281,7 +1260,7 @@ void InterfaceDeclaration::semantic(Scope *sc)
         scope = NULL;
     }
 
-    int errors = global.gaggedErrors;
+    int errors = global.errors;
 
     if (sc->stc & STCdeprecated)
     {
@@ -1456,8 +1435,8 @@ void InterfaceDeclaration::semantic(Scope *sc)
         s->semantic(sc);
     }
 
-    if (global.gag && global.gaggedErrors != errors)
-    {   // The type is no good, yet the error messages were gagged.
+    if (global.errors != errors)
+    {   // The type is no good.
         type = Type::terror;
     }
 
@@ -1465,6 +1444,15 @@ void InterfaceDeclaration::semantic(Scope *sc)
     //members->print();
     sc->pop();
     //printf("-InterfaceDeclaration::semantic(%s), type = %p\n", toChars(), type);
+
+#if 0
+    if (type->ty == Tclass && ((TypeClass *)type)->sym != this)
+    {
+        printf("this = %p %s\n", this, this->toChars());
+        printf("type = %d sym = %p\n", type->ty, ((TypeClass *)type)->sym);
+    }
+#endif
+    assert(type->ty != Tclass || ((TypeClass *)type)->sym == this);
 }
 
 

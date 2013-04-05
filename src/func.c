@@ -830,6 +830,21 @@ Ldone:
      */
     scope = new Scope(*sc);
     scope->setNoFree();
+
+    static bool printedMain = false;  // semantic might run more than once
+    if (global.params.verbose && !printedMain)
+    {
+        const char *type = isMain() ? "main" : isWinMain() ? "winmain" : isDllMain() ? "dllmain" : NULL;
+        Module *mod = sc->module;
+
+        if (type && mod)
+        {
+            printedMain = true;
+            const char *name = FileName::searchPath(global.path, mod->srcfile->toChars(), 1);
+            printf("%-10s%-10s\t%s\n", "entry", type, name);
+        }
+    }
+
     return;
 }
 
@@ -934,7 +949,8 @@ void FuncDeclaration::semantic3(Scope *sc)
         sc2->protection = PROTpublic;
         sc2->explicitProtection = 0;
         sc2->structalign = STRUCTALIGN_DEFAULT;
-        sc2->flags = sc->flags & ~SCOPEcontract;
+        if (this->ident != Id::require && this->ident != Id::ensure)
+            sc2->flags = sc->flags & ~SCOPEcontract;
         sc2->tf = NULL;
         sc2->noctor = 0;
         sc2->speculative = sc->speculative || isSpeculative() != NULL;
@@ -1301,16 +1317,16 @@ void FuncDeclaration::semantic3(Scope *sc)
                     sc2->callSuper = 0;
 
                     // Insert implicit super() at start of fbody
-                    Expression *e1 = new SuperExp(0);
-                    Expression *e = new CallExp(0, e1);
-
-                    e = e->trySemantic(sc2);
-                    if (!e)
+                    if (!resolveFuncCall(0, sc2, cd->baseClass->ctor, NULL, NULL, NULL, 1))
                     {
                         error("no match for implicit super() call in constructor");
                     }
                     else
                     {
+                        Expression *e1 = new SuperExp(0);
+                        Expression *e = new CallExp(0, e1);
+                        e = e->semantic(sc2);
+
                         Statement *s = new ExpStatement(0, e);
                         fbody = new CompoundStatement(0, s, fbody);
                     }
@@ -1650,7 +1666,7 @@ void FuncDeclaration::semantic3(Scope *sc)
                 {
                     if (!global.params.is64bit &&
                         global.params.isWindows &&
-                        !isStatic() && !fbody->usesEH())
+                        !isStatic() && !fbody->usesEH() && !global.params.trace)
                     {
                         /* The back end uses the "jmonitor" hack for syncing;
                          * no need to do the sync at this level.

@@ -68,7 +68,14 @@ Expression *expandVar(int result, VarDeclaration *v)
                         v->error("recursive initialization of constant");
                     goto L1;
                 }
-                Expression *ei = v->init->toExpression();
+                if (v->scope)
+                {
+                    v->inuse++;
+                    v->init->semantic(v->scope, v->type, INITinterpret);
+                    v->scope = NULL;
+                    v->inuse--;
+                }
+                Expression *ei = v->init->toExpression(v->type);
                 if (!ei)
                 {   if (v->storage_class & STCmanifest)
                         v->error("enum cannot be initialized with %s", v->init->toChars());
@@ -97,18 +104,7 @@ Expression *expandVar(int result, VarDeclaration *v)
                     else
                         goto L1;
                 }
-                if (v->scope)
-                {
-                    v->inuse++;
-                    e = ei->syntaxCopy();
-                    e = e->semantic(v->scope);
-                    e = e->implicitCastTo(v->scope, v->type);
-                    // enabling this line causes test22 in test suite to fail
-                    //ei->type = e->type;
-                    v->scope = NULL;
-                    v->inuse--;
-                }
-                else if (!ei->type)
+                if (!ei->type)
                 {
                     goto L1;
                 }
@@ -199,9 +195,11 @@ Expression *VarExp::optimize(int result, bool keepLvalue)
 
 Expression *TupleExp::optimize(int result, bool keepLvalue)
 {
+    if (e0)
+        e0 = e0->optimize(WANTvalue | (result & WANTinterpret));
     for (size_t i = 0; i < exps->dim; i++)
-    {   Expression *e = (*exps)[i];
-
+    {
+        Expression *e = (*exps)[i];
         e = e->optimize(WANTvalue | (result & WANTinterpret));
         (*exps)[i] = e;
     }
@@ -315,6 +313,14 @@ Expression *BoolExp::optimize(int result, bool keepLvalue)
     else
         e = this;
     return e;
+}
+
+Expression *SymOffExp::optimize(int result, bool keepLvalue)
+{
+    assert(var);
+    if ((result & WANTinterpret) && var->isThreadlocal())
+            error("cannot take address of thread-local variable %s at compile time", var->toChars());
+    return this;
 }
 
 Expression *AddrExp::optimize(int result, bool keepLvalue)

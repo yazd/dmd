@@ -1,6 +1,6 @@
 
 // Compiler implementation of the D programming language
-// Copyright (c) 1999-2012 by Digital Mars
+// Copyright (c) 1999-2013 by Digital Mars
 // All Rights Reserved
 // written by Walter Bright
 // http://www.digitalmars.com
@@ -56,7 +56,13 @@ struct AggregateDeclaration : ScopeDsymbol
     bool isdeprecated;          // !=0 if deprecated
 
 #if DMDV2
-    bool isnested;              // !=0 if is nested
+    Dsymbol *enclosing;         /* !=NULL if is nested
+                                 * pointing to the dsymbol that directly enclosing it.
+                                 * 1. The function that enclosing it (nested struct and class)
+                                 * 2. The class that enclosing it (nested class only)
+                                 * 3. If enclosing aggregate is template, its enclosing dsymbol.
+                                 * See AggregateDeclaraton::makeNested for the details.
+                                 */
     VarDeclaration *vthis;      // 'this' parameter if this aggregate is nested
 #endif
     // Special member functions
@@ -65,9 +71,9 @@ struct AggregateDeclaration : ScopeDsymbol
     DeleteDeclaration *aggDelete;       // deallocator
 
 #if DMDV2
-    //CtorDeclaration *ctor;
     Dsymbol *ctor;                      // CtorDeclaration or TemplateDeclaration
-    CtorDeclaration *defaultCtor;       // default constructor
+    CtorDeclaration *defaultCtor;       // default constructor - should have no arguments, because
+                                        // it would be stored in TypeInfo_Class.defaultConstructor
     Dsymbol *aliasthis;                 // forward unresolved lookups to aliasthis
     bool noDefaultCtor;         // no default construction
 #endif
@@ -90,9 +96,10 @@ struct AggregateDeclaration : ScopeDsymbol
     Type *getType();
     int firstFieldInUnion(int indx); // first field in union that includes indx
     int numFieldsInUnion(int firstIndex); // #fields in union starting at index
-    int isDeprecated();         // is aggregate deprecated?
+    bool isDeprecated();         // is aggregate deprecated?
     FuncDeclaration *buildDtor(Scope *sc);
-    int isNested();
+    bool isNested();
+    void makeNested();
     int isExport();
 
     void emitComment(Scope *sc);
@@ -160,7 +167,6 @@ struct StructDeclaration : AggregateDeclaration
     FuncDeclaration *buildCpCtor(Scope *sc);
 
     FuncDeclaration *buildXopEquals(Scope *sc);
-    void makeNested();
 #endif
     void toDocBuffer(OutBuffer *buf, Scope *sc);
 
@@ -244,10 +250,6 @@ struct ClassDeclaration : AggregateDeclaration
                                         // it derives from IUnknown)
     int isscope;                         // !=0 if this is an auto class
     int isabstract;                     // !=0 if abstract class
-#if DMDV1
-    bool isnested;                      // !=0 if is nested
-    VarDeclaration *vthis;              // 'this' parameter if this class is nested
-#endif
     int inuse;                          // to prevent recursive attempts
 
     ClassDeclaration(Loc loc, Identifier *id, BaseClasses *baseclasses);
@@ -267,9 +269,6 @@ struct ClassDeclaration : AggregateDeclaration
 #endif
     FuncDeclaration *findFunc(Identifier *ident, TypeFunction *tf);
     void interfaceSemantic(Scope *sc);
-#if DMDV1
-    int isNested();
-#endif
     int isCOMclass();
     virtual int isCOMinterface();
 #if DMDV2

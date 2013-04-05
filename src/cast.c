@@ -452,7 +452,10 @@ MATCH StructLiteralExp::implicitConvTo(Type *t)
     {
         m = MATCHconst;
         for (size_t i = 0; i < elements->dim; i++)
-        {   Expression *e = (*elements)[i];
+        {
+            Expression *e = (*elements)[i];
+            if (!e)
+                continue;
             Type *te = e->type;
             te = te->castMod(t->mod);
             MATCH m2 = e->implicitConvTo(te);
@@ -1208,6 +1211,14 @@ Expression *NullExp::castTo(Scope *sc, Type *t)
     return e;
 }
 
+Expression *StructLiteralExp::castTo(Scope *sc, Type *t)
+{
+    Expression *e = Expression::castTo(sc, t);
+    if (e->op == TOKstructliteral)
+        ((StructLiteralExp *)e)->stype = t; // commit type
+    return e;
+}
+
 Expression *StringExp::castTo(Scope *sc, Type *t)
 {
     /* This follows copy-on-write; any changes to 'this'
@@ -1511,7 +1522,9 @@ Expression *AddrExp::castTo(Scope *sc, Type *t)
 
 
 Expression *TupleExp::castTo(Scope *sc, Type *t)
-{   TupleExp *e = (TupleExp *)copy();
+{
+    TupleExp *e = (TupleExp *)copy();
+    e->e0 = e0 ? e0->copy() : NULL;
     e->exps = (Expressions *)exps->copy();
     for (size_t i = 0; i < e->exps->dim; i++)
     {   Expression *ex = (*e->exps)[i];

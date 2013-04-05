@@ -46,7 +46,7 @@ AggregateDeclaration::AggregateDeclaration(Loc loc, Identifier *id)
 
     stag = NULL;
     sinit = NULL;
-    isnested = false;
+    enclosing = NULL;
     vthis = NULL;
 
 #if DMDV2
@@ -106,7 +106,7 @@ void AggregateDeclaration::semantic3(Scope *sc)
         }
         sc->pop();
 
-        if (!getRTInfo && Type::rtinfo && 
+        if (!getRTInfo && Type::rtinfo &&
             (!isDeprecated() || global.params.useDeprecated) && // don't do it for unused deprecated types
             (type && type->ty != Terror)) // or error types
         {   // Evaluate: gcinfo!type
@@ -201,7 +201,7 @@ Type *AggregateDeclaration::getType()
     return type;
 }
 
-int AggregateDeclaration::isDeprecated()
+bool AggregateDeclaration::isDeprecated()
 {
     return isdeprecated;
 }
@@ -291,14 +291,68 @@ unsigned AggregateDeclaration::placeField(
 
 
 /****************************************
- * Returns !=0 if there's an extra member which is the 'this'
+ * Returns true if there's an extra member which is the 'this'
  * pointer to the enclosing context (enclosing aggregate or function)
  */
 
-int AggregateDeclaration::isNested()
+bool AggregateDeclaration::isNested()
 {
-    assert((isnested & ~1) == 0);
-    return isnested;
+    return enclosing != NULL;
+}
+
+void AggregateDeclaration::makeNested()
+{
+    if (!enclosing && sizeok != SIZEOKdone && !isUnionDeclaration() && !isInterfaceDeclaration())
+    {
+        // If nested struct, add in hidden 'this' pointer to outer scope
+        if (!(storage_class & STCstatic))
+        {
+            Dsymbol *s = toParent2();
+            if (s)
+            {
+                AggregateDeclaration *ad = s->isAggregateDeclaration();
+                FuncDeclaration *fd = s->isFuncDeclaration();
+
+                if (fd)
+                {
+                    enclosing = fd;
+                }
+                else if (isClassDeclaration() && ad && ad->isClassDeclaration())
+                {
+                    enclosing = ad;
+                }
+                else if (isStructDeclaration() && ad)
+                {
+                    if (TemplateInstance *ti = ad->parent->isTemplateInstance())
+                    {
+                        enclosing = ti->enclosing;
+                    }
+                }
+                if (enclosing)
+                {
+                    //printf("makeNested %s, enclosing = %s\n", toChars(), enclosing->toChars());
+                    Type *t;
+                    if (ad)
+                        t = ad->handle;
+                    else if (fd)
+                    {   AggregateDeclaration *ad2 = fd->isMember2();
+                        if (ad2)
+                            t = ad2->handle;
+                        else
+                            t = Type::tvoidptr;
+                    }
+                    else
+                        assert(0);
+                    if (t->ty == Tstruct)
+                        t = Type::tvoidptr;     // t should not be a ref type
+                    assert(!vthis);
+                    vthis = new ThisDeclaration(loc, t);
+                    //vthis->storage_class |= STCref;
+                    members->push(vthis);
+                }
+            }
+        }
+    }
 }
 
 /****************************************
@@ -418,7 +472,7 @@ void StructDeclaration::semantic(Scope *sc)
         scope = NULL;
     }
 
-    int errors = global.gaggedErrors;
+    int errors = global.errors;
 
     unsigned dprogress_save = Module::dprogress;
 
@@ -647,8 +701,8 @@ void StructDeclaration::semantic(Scope *sc)
         semantic3(sc);
     }
 
-    if (global.gag && global.gaggedErrors != errors)
-    {   // The type is no good, yet the error messages were gagged.
+    if (global.errors != errors)
+    {   // The type is no good.
         type = Type::terror;
     }
 
@@ -662,7 +716,7 @@ void StructDeclaration::semantic(Scope *sc)
     if (type->ty == Tstruct && ((TypeStruct *)type)->sym != this)
     {
         printf("this = %p %s\n", this, this->toChars());
-        printf("type = %d %s, sym = %p\n", type->ty, type->toChars(), ((TypeStruct *)type)->sym);
+        printf("type = %d sym = %p\n", type->ty, ((TypeStruct *)type)->sym);
     }
 #endif
     assert(type->ty != Tstruct || ((TypeStruct *)type)->sym == this);
@@ -718,45 +772,6 @@ void StructDeclaration::finalizeSize(Scope *sc)
     sizeok = SIZEOKdone;
 }
 
-void StructDeclaration::makeNested()
-{
-    if (!isnested && sizeok != SIZEOKdone && !isUnionDeclaration())
-    {
-        // If nested struct, add in hidden 'this' pointer to outer scope
-        if (!(storage_class & STCstatic))
-        {   Dsymbol *s = toParent2();
-            if (s)
-            {
-                AggregateDeclaration *ad = s->isAggregateDeclaration();
-                FuncDeclaration *fd = s->isFuncDeclaration();
-
-                TemplateInstance *ti;
-                if (ad && (ti = ad->parent->isTemplateInstance()) != NULL && ti->isnested || fd)
-                {   isnested = true;
-                    Type *t;
-                    if (ad)
-                        t = ad->handle;
-                    else if (fd)
-                    {   AggregateDeclaration *ad = fd->isMember2();
-                        if (ad)
-                            t = ad->handle;
-                        else
-                            t = Type::tvoidptr;
-                    }
-                    else
-                        assert(0);
-                    if (t->ty == Tstruct)
-                        t = Type::tvoidptr;     // t should not be a ref type
-                    assert(!vthis);
-                    vthis = new ThisDeclaration(loc, t);
-                    //vthis->storage_class |= STCref;
-                    members->push(vthis);
-                }
-            }
-        }
-    }
-}
-
 /***************************************
  * Return true if struct is POD (Plain Old Data).
  * This is defined as:
@@ -771,7 +786,7 @@ void StructDeclaration::makeNested()
  */
 bool StructDeclaration::isPOD()
 {
-    if (isnested || cpctor || postblit || ctor || dtor)
+    if (enclosing || cpctor || postblit || ctor || dtor)
         return false;
 
     /* Recursively check any fields have a constructor.

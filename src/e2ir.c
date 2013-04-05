@@ -2475,7 +2475,73 @@ elem *EqualExp::toElem(IRState *irs)
     else if ((t1->ty == Tarray || t1->ty == Tsarray) &&
              (t2->ty == Tarray || t2->ty == Tsarray))
     {
-        Type *telement = t1->nextOf()->toBasetype();
+        Type *telement  = t1->nextOf()->toBasetype();
+        Type *telement2 = t2->nextOf()->toBasetype();
+
+        if ((telement->isintegral() || telement->ty == Tvoid) && telement->ty == telement2->ty)
+        {
+            // Optimize comparisons of arrays of basic types
+            // For arrays of integers/characters, and void[],
+            // replace druntime call with:
+            // For a==b: a.length==b.length && memcmp(a.ptr, b.ptr, size)==0
+            // For a!=b: a.length!=b.length || memcmp(a.ptr, b.ptr, size)!=0
+            // size is a.length*sizeof(a[0]) for dynamic arrays, or sizeof(a) for static arrays.
+
+            elem *earr1 = e1->toElem(irs);
+            elem *earr2 = e2->toElem(irs);
+            elem *eptr1, *eptr2; // Pointer to data, to pass to memcmp
+            elem *elen1, *elen2; // Length, for comparison
+            elem *esiz1, *esiz2; // Data size, to pass to memcmp
+            d_uns64 sz = telement->size(); // Size of one element
+
+            if (t1->ty == Tarray)
+            {
+                elen1 = el_una(I64 ? OP128_64 : OP64_32, TYsize_t, el_same(&earr1));
+                esiz1 = el_bin(OPmul, TYsize_t, el_same(&elen1), el_long(TYsize_t, sz));
+                eptr1 = array_toPtr(t1, el_same(&earr1));
+            }
+            else
+            {
+                elen1 = el_long(TYsize_t, ((TypeSArray *)t1)->dim->toInteger());
+                esiz1 = el_long(TYsize_t, t1->size());
+                earr1 = addressElem(earr1, t1);
+                eptr1 = el_same(&earr1);
+            }
+
+            if (t2->ty == Tarray)
+            {
+                elen2 = el_una(I64 ? OP128_64 : OP64_32, TYsize_t, el_same(&earr2));
+                esiz2 = el_bin(OPmul, TYsize_t, el_same(&elen2), el_long(TYsize_t, sz));
+                eptr2 = array_toPtr(t2, el_same(&earr2));
+            }
+            else
+            {
+                elen2 = el_long(TYsize_t, ((TypeSArray *)t2)->dim->toInteger());
+                esiz2 = el_long(TYsize_t, t2->size());
+                earr2 = addressElem(earr2, t2);
+                eptr2 = el_same(&earr2);
+            }
+
+            elem *esize = t2->ty == Tsarray ? esiz2 : esiz1;
+
+            e = el_param(eptr1, eptr2);
+            e = el_bin(OPmemcmp, TYint, e, esize);
+            e = el_bin(eop, TYint, e, el_long(TYint, 0));
+
+            if (t1->ty == Tsarray && t2->ty == Tsarray)
+                assert(t1->size() == t2->size());
+            else
+            {
+                elem *elencmp = el_bin(eop, TYint, elen1, elen2);
+                e = el_bin(op==TOKequal ? OPandand : OPoror, TYint, elencmp, e);
+            }
+
+            // Ensure left-to-right order of evaluation
+            e = el_combine(earr2, e);
+            e = el_combine(earr1, e);
+            el_setLoc(e,loc);
+            return e;
+        }
 
         elem *ea1 = eval_Darray(irs, e1);
         elem *ea2 = eval_Darray(irs, e2);
@@ -2977,7 +3043,7 @@ elem *AssignExp::toElem(IRState *irs)
             elem *ey = NULL;
             unsigned sz = e1->type->size();
             StructDeclaration *sd = ((TypeStruct *)t1b)->sym;
-            if (sd->isnested && op == TOKconstruct)
+            if (sd->isNested() && op == TOKconstruct)
             {
                 ey = el_una(OPaddr, TYnptr, eleft);
                 eleft = el_same(&ey);
@@ -2989,7 +3055,7 @@ elem *AssignExp::toElem(IRState *irs)
             elem *enbytes = el_long(TYsize_t, sz);
             elem *evalue = el_long(TYsize_t, 0);
 
-            if (!(sd->isnested && op == TOKconstruct))
+            if (!(sd->isNested() && op == TOKconstruct))
                 el = el_una(OPaddr, TYnptr, el);
             e = el_param(enbytes, evalue);
             e = el_bin(OPmemset,TYnptr,el,e);
@@ -4783,13 +4849,15 @@ elem *IndexExp::toElem(IRState *irs)
 
 
 elem *TupleExp::toElem(IRState *irs)
-{   elem *e = NULL;
-
+{
     //printf("TupleExp::toElem() %s\n", toChars());
+    elem *e = NULL;
+    if (e0)
+        e = e0->toElem(irs);
     for (size_t i = 0; i < exps->dim; i++)
-    {   Expression *el = (*exps)[i];
+    {
+        Expression *el = (*exps)[i];
         elem *ep = el->toElem(irs);
-
         e = el_combine(e, ep);
     }
     return e;
@@ -5103,7 +5171,7 @@ elem *StructLiteralExp::toElem(IRState *irs)
     if (elements)
     {
         size_t dim = elements->dim;
-        assert(dim <= sd->fields.dim - sd->isnested);
+        assert(dim <= sd->fields.dim - sd->isNested());
         for (size_t i = 0; i < dim; i++)
         {   Expression *el = (*elements)[i];
             if (!el)
@@ -5201,7 +5269,7 @@ elem *StructLiteralExp::toElem(IRState *irs)
     }
 
 #if DMDV2
-    if (sd->isnested)
+    if (sd->isNested())
     {   // Initialize the hidden 'this' pointer
         assert(sd->fields.dim);
         Dsymbol *s = sd->fields[sd->fields.dim - 1];
