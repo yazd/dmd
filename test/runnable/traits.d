@@ -613,6 +613,16 @@ void test23()
 }
 
 /********************************************************/
+
+struct Test24
+{
+    public void test24(int){}
+    private void test24(int, int){}
+}
+
+static assert(__traits(getProtection, __traits(getOverloads, Test24, "test24")[1]) == "private");
+
+/********************************************************/
 // 1369
 
 void test1369()
@@ -667,6 +677,20 @@ struct S2234c{ alias Foo2234!() foo; }
 static assert([__traits(allMembers, S2234a)] == ["x"]);
 static assert([__traits(allMembers, S2234b)] == ["x"]);
 static assert([__traits(allMembers, S2234c)] == ["foo"]);
+
+/********************************************************/
+// 5878
+
+template J5878(A)
+{
+    static if (is(A P == super))
+        alias P J5878;
+}
+
+alias J5878!(A5878) Z5878;
+
+class X5878 {}
+class A5878 : X5878 {}
 
 /********************************************************/
 
@@ -1115,6 +1139,24 @@ void test9136()
     static assert(__traits(isNested, A.NC));
 }
 
+/********************************************************/
+
+struct Test25
+{
+    int f;
+    enum /*Anonymous enum*/
+    {
+        A,
+        B
+    }
+    enum NamedEnum
+    {
+        C,
+        D
+    }
+}
+
+static assert([__traits(allMembers, Test25)] == ["f", "A", "B", "NamedEnum"]);
 /********************************************************/
 
 int main()

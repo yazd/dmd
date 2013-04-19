@@ -755,8 +755,16 @@ Expression *scrubReturnValue(Loc loc, Expression *e)
 {
     if (e->op == TOKclassreference)
     {
-        error(loc, "%s class literals cannot be returned from CTFE", ((ClassReferenceExp*)e)->originalClass()->toChars());
-        return EXP_CANT_INTERPRET;
+        StructLiteralExp *se = ((ClassReferenceExp*)e)->value;
+        se->ownedByCtfe = false;
+        if (!(se->stageflags & stageScrub))
+        {
+            int old = se->stageflags;
+            se->stageflags |= stageScrub;
+            if (!scrubArray(loc, se->elements, true))
+                return EXP_CANT_INTERPRET;
+            se->stageflags = old;
+        }
     }
     if (e->op == TOKvoid)
     {
@@ -771,8 +779,14 @@ Expression *scrubReturnValue(Loc loc, Expression *e)
     {
         StructLiteralExp *se = (StructLiteralExp *)e;
         se->ownedByCtfe = false;
-        if (!scrubArray(loc, se->elements, true))
-            return EXP_CANT_INTERPRET;
+        if (!(se->stageflags & stageScrub))
+        {
+            int old = se->stageflags;
+            se->stageflags |= stageScrub;
+            if (!scrubArray(loc, se->elements, true))
+                return EXP_CANT_INTERPRET;
+            se->stageflags = old;
+        }
     }
     if (e->op == TOKstring)
     {
@@ -1456,6 +1470,10 @@ Expression *SymOffExp::interpret(InterState *istate, CtfeGoal goal)
     {
         return this;
     }
+    if (isTypeInfo_Class(type) && offset == 0)
+    {
+        return this;
+    }
     if (type->ty != Tpointer)
     {   // Probably impossible
         error("Cannot interpret %s at compile time", toChars());
@@ -1639,7 +1657,7 @@ Expression *getVarExp(Loc loc, InterState *istate, Declaration *d, CtfeGoal goal
 #else
         if (v->isConst() && v->init && !v->isCTFE())
 #endif
-        {   e = v->init->toExpression();
+        {   e = v->init->toExpression(v->type);
             if (e && (e->op == TOKconstruct || e->op == TOKblit))
             {   AssignExp *ae = (AssignExp *)e;
                 e = ae->e2;
@@ -3933,7 +3951,7 @@ Expression *CallExp::interpret(InterState *istate, CtfeGoal goal)
         Expression * pe = ((PtrExp*)ecall)->e1;
         if (pe->op == TOKvar) {
             VarDeclaration *vd = ((VarExp *)((PtrExp*)ecall)->e1)->var->isVarDeclaration();
-            if (vd && vd->getValue() && vd->getValue()->op == TOKsymoff)
+            if (vd && vd->hasValue() && vd->getValue()->op == TOKsymoff)
                 fd = ((SymOffExp *)vd->getValue())->var->isFuncDeclaration();
             else
             {
@@ -3974,7 +3992,7 @@ Expression *CallExp::interpret(InterState *istate, CtfeGoal goal)
     else if (ecall->op == TOKvar)
     {
         VarDeclaration *vd = ((VarExp *)ecall)->var->isVarDeclaration();
-        if (vd && vd->getValue())
+        if (vd && vd->hasValue())
             ecall = vd->getValue();
         else // Calling a function
             fd = ((VarExp *)e1)->var->isFuncDeclaration();
@@ -4024,8 +4042,10 @@ Expression *CallExp::interpret(InterState *istate, CtfeGoal goal)
         {   // Make a virtual function call.
             Expression *thisval = pthis;
             if (pthis->op == TOKvar)
-            {   assert(((VarExp*)thisval)->var->isVarDeclaration());
-                thisval = ((VarExp*)thisval)->var->isVarDeclaration()->getValue();
+            {
+                VarDeclaration *vthis = ((VarExp*)thisval)->var->isVarDeclaration();
+                assert(vthis);
+                thisval = getVarExp(loc, istate, vthis, ctfeNeedLvalue);
                 // If it is a reference, resolve it
                 if (thisval->op != TOKnull && thisval->op != TOKclassreference)
                     thisval = pthis->interpret(istate);
@@ -4888,7 +4908,34 @@ Expression *PtrExp::interpret(InterState *istate, CtfeGoal goal)
     }
 #endif
     else
-    {   // It's possible we have an array bounds error. We need to make sure it
+    {
+        // Check for .classinfo, which is lowered in the semantic pass into **(class).
+        if (e1->op == TOKstar && e1->type->ty == Tpointer && isTypeInfo_Class(e1->type->nextOf()))
+        {
+            e = (((PtrExp *)e1)->e1)->interpret(istate, ctfeNeedLvalue);
+            if (exceptionOrCantInterpret(e))
+                return e;
+            if (e->op == TOKnull)
+            {
+                error("Null pointer dereference evaluating typeid. '%s' is null", ((PtrExp *)e1)->e1->toChars());
+                return EXP_CANT_INTERPRET;
+            }
+            if (e->op != TOKclassreference)
+            {   error("CTFE internal error determining classinfo");
+                return EXP_CANT_INTERPRET;
+            }
+            ClassDeclaration *cd = ((ClassReferenceExp *)e)->originalClass();
+            assert(cd);
+
+            // Create the classinfo, if it doesn't yet exist.
+            // TODO: This belongs in semantic, CTFE should not have to do this.
+            if (!cd->vclassinfo)
+                cd->vclassinfo = new TypeInfoClassDeclaration(cd->type);
+            e = new SymOffExp(loc, cd->vclassinfo, 0);
+            e->type = type;
+            return e;
+        }
+       // It's possible we have an array bounds error. We need to make sure it
         // errors with this line number, not the one where the pointer was set.
         e = e1->interpret(istate, ctfeNeedLvalue);
         if (exceptionOrCantInterpret(e))

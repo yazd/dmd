@@ -1760,7 +1760,8 @@ Expression *FuncExp::castTo(Scope *sc, Type *t)
             e = e->castTo(sc, t);
         else if (!e->type->equals(t))
         {
-            assert(e->type->nextOf()->covariant(t->nextOf()) == 1);
+            assert(t->ty == Tpointer && t->nextOf()->ty == Tvoid || // Bugzilla 9928
+                   e->type->nextOf()->covariant(t->nextOf()) == 1);
             e = e->copy();
             e->type = t;
         }
@@ -1809,22 +1810,11 @@ Expression *SliceExp::castTo(Scope *sc, Type *t)
     Expression *e;
     if (typeb->ty == Tarray && tb->ty == Tsarray)
     {
-        e = copy();
-
-        /* Rewrite:
-         *      arr[lwr .. upr]
-         * as:
-         *      *(cast(T[dim]*)(arr[lwr .. upr].ptr))
-         *
-         * Note that:
-         *      static assert(dim == upr - lwr);
+        /* If a SliceExp has Tsarray, it will become lvalue.
+         * That's handled in SliceExp::isLvalue and toLvalue
          */
-        e = new DotIdExp(e->loc, e, Id::ptr);
-        e = e->semantic(sc);
-        e = e->castTo(sc, t->pointerTo());
-        e = new PtrExp(e->loc, e);
-        e = e->semantic(sc);
-        //printf("e = %s, %s => %s %s\n", toChars(), type->toChars(), e->toChars(), e->type->toChars());
+        e = copy();
+        e->type = t;
     }
     else
     {
@@ -2604,6 +2594,7 @@ Lcc:
     {
         e2 = e2->castTo(sc, t1);
         t2 = t1;
+        t = t1;
         goto Lagain;
     }
     else if (t2->ty == Tvector && t1->ty != Tvector &&
@@ -2611,6 +2602,7 @@ Lcc:
     {
         e1 = e1->castTo(sc, t2);
         t1 = t2;
+        t = t1;
         goto Lagain;
     }
     else if (t1->isintegral() && t2->isintegral())

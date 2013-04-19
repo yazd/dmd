@@ -24,6 +24,7 @@
 #include "expression.h"
 #include "statement.h"
 #include "hdrgen.h"
+#include "ctfe.h"
 
 AggregateDeclaration *isAggregate(Type *t); // from opover.c
 
@@ -1708,6 +1709,55 @@ void VarDeclaration::semantic2(Scope *sc)
         init = init->semantic(sc, type, INITinterpret);
         inuse--;
     }
+    if (storage_class & STCmanifest)
+    {
+    #if 0
+        if ((type->ty == Tclass)&&type->isMutable())
+        {
+            error("is mutable. Only const and immutable class enum are allowed, not %s", type->toChars());
+        }
+        else if (type->ty == Tpointer && type->nextOf()->ty == Tstruct && type->nextOf()->isMutable())
+        {
+            ExpInitializer *ei = init->isExpInitializer();
+            if (ei->exp->op == TOKaddress && ((AddrExp *)ei->exp)->e1->op == TOKstructliteral)
+            {
+                error("is a pointer to mutable struct. Only pointers to const or immutable struct enum are allowed, not %s", type->toChars());
+            }
+        }
+    #else
+        if (type->ty == Tclass && init)
+        {
+            ExpInitializer *ei = init->isExpInitializer();
+            if (ei->exp->op == TOKclassreference)
+                error(": Unable to initialize enum with class or pointer to struct. Use static const variable instead.");
+        }
+        else if (type->ty == Tpointer && type->nextOf()->ty == Tstruct)
+        {
+            ExpInitializer *ei = init->isExpInitializer();
+            if (ei && ei->exp->op == TOKaddress && ((AddrExp *)ei->exp)->e1->op == TOKstructliteral)
+            {
+                error(": Unable to initialize enum with class or pointer to struct. Use static const variable instead.");
+            }
+        }
+    #endif
+    }
+    else if (init && isThreadlocal())
+    {
+        if ((type->ty == Tclass)&&type->isMutable()&&!type->isShared())
+        {
+            ExpInitializer *ei = init->isExpInitializer();
+            if (ei->exp->op == TOKclassreference)
+                error("is mutable. Only const or immutable class thread local variable are allowed, not %s", type->toChars());
+        }
+        else if (type->ty == Tpointer && type->nextOf()->ty == Tstruct && type->nextOf()->isMutable() &&!type->nextOf()->isShared())
+        {
+            ExpInitializer *ei = init->isExpInitializer();
+            if (ei && ei->exp->op == TOKaddress && ((AddrExp *)ei->exp)->e1->op == TOKstructliteral)
+            {
+                error("is a pointer to mutable struct. Only pointers to const, immutable or shared struct thread local variable are allowed are allowed, not %s", type->toChars());
+            }
+        }
+    }
     sem = Semantic2Done;
 }
 
@@ -1751,32 +1801,9 @@ void VarDeclaration::setFieldOffset(AggregateDeclaration *ad, unsigned *poffset,
     {   // References are the size of a pointer
         t = Type::tvoidptr;
     }
-    if (t->ty == Tstruct)
-    {   TypeStruct *ts = (TypeStruct *)t;
-#if DMDV2
-        if (ts->sym == ad)
-        {
-            ad->error("cannot have field %s with same struct type", toChars());
-        }
-#endif
-
-        if (ts->sym->sizeok != SIZEOKdone && ts->sym->scope)
-            ts->sym->semantic(NULL);
-        if (ts->sym->sizeok != SIZEOKdone)
-        {
-            ad->sizeok = SIZEOKfwd;         // cannot finish; flag as forward referenced
-            return;
-        }
-    }
-    if (t->ty == Tident)
+    if (t->ty == Tstruct || t->ty == Tsarray)
     {
-        ad->sizeok = SIZEOKfwd;             // cannot finish; flag as forward referenced
-        return;
-    }
-#if DMDV2
-    else if (t->ty == Tsarray)
-    {
-        Type *tv = t->toBasetype();
+        Type *tv = t;
         while (tv->ty == Tsarray)
         {
             tv = tv->nextOf()->toBasetype();
@@ -1784,14 +1811,26 @@ void VarDeclaration::setFieldOffset(AggregateDeclaration *ad, unsigned *poffset,
         if (tv->ty == Tstruct)
         {
             TypeStruct *ts = (TypeStruct *)tv;
-            if (ad == ts->sym)
+            if (ts->sym == ad)
             {
-                ad->error("cannot have field %s with same struct type", toChars());
+                const char *s = (t->ty == Tsarray) ? "static array of " : "";
+                ad->error("cannot have field %s with %ssame struct type", toChars(), s);
+            }
+            if (ts->sym->sizeok != SIZEOKdone && ts->sym->scope)
+                ts->sym->semantic(NULL);
+            if (ts->sym->sizeok != SIZEOKdone)
+            {
+                ad->sizeok = SIZEOKfwd;         // cannot finish; flag as forward referenced
                 return;
             }
         }
     }
-#endif
+    if (t->ty == Tident)
+    {
+        ad->sizeok = SIZEOKfwd;             // cannot finish; flag as forward referenced
+        return;
+    }
+
 
     unsigned memsize      = t->size(loc);            // size of member
     unsigned memalignsize = t->alignsize();          // size of member for alignment purposes

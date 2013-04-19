@@ -104,6 +104,13 @@ Expression *expandVar(int result, VarDeclaration *v)
                     else
                         goto L1;
                 }
+                else if (!(result & WANTinterpret) &&
+                         !(v->storage_class & STCmanifest) &&
+                         ei->isConst() != 1 && ei->op != TOKstring &&
+                         ei->op != TOKaddress)
+                {
+                    goto L1;
+                }
                 if (!ei->type)
                 {
                     goto L1;
@@ -238,6 +245,9 @@ Expression *AssocArrayLiteralExp::optimize(int result, bool keepLvalue)
 
 Expression *StructLiteralExp::optimize(int result, bool keepLvalue)
 {
+    if(stageflags & stageOptimize) return this;
+    int old = stageflags;
+    stageflags |= stageOptimize;
     if (elements)
     {
         for (size_t i = 0; i < elements->dim; i++)
@@ -248,6 +258,7 @@ Expression *StructLiteralExp::optimize(int result, bool keepLvalue)
             (*elements)[i] = e;
         }
     }
+    stageflags = old;
     return this;
 }
 
@@ -496,7 +507,13 @@ Expression *NewExp::optimize(int result, bool keepLvalue)
     }
     if (result & WANTinterpret)
     {
-        error("cannot evaluate %s at compile time", toChars());
+        Expression *eresult = interpret(NULL);
+        if (eresult == EXP_CANT_INTERPRET)
+            return this;
+        if (eresult && eresult != EXP_VOID_INTERPRET)
+            return eresult;
+        else
+            error("cannot evaluate %s at compile time", toChars());
     }
     return this;
 }
@@ -516,12 +533,8 @@ Expression *CallExp::optimize(int result, bool keepLvalue)
         size_t pdim = Parameter::dim(tf->parameters) - (tf->varargs == 2 ? 1 : 0);
         for (size_t i = 0; i < arguments->dim; i++)
         {
-            bool keepLvalue = false;
-            if (i < pdim)
-            {
-                Parameter *p = Parameter::getNth(tf->parameters, i);
-                keepLvalue = ((p->storageClass & (STCref | STCout)) != 0);
-            }
+            Parameter *p = Parameter::getNth(tf->parameters, i);
+            bool keepLvalue = (p ? (p->storageClass & (STCref | STCout)) != 0 : false);
             Expression *e = (*arguments)[i];
             e = e->optimize(WANTvalue, keepLvalue);
             (*arguments)[i] = e;

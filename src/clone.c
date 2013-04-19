@@ -47,8 +47,8 @@ FuncDeclaration *AggregateDeclaration::hasIdentityOpAssign(Scope *sc, Dsymbol *a
         sc = sc->push();
         sc->speculative = true;
 
-                 f = resolveFuncCall(loc, sc, assign, NULL, er, &ar, 1);
-        if (!f)  f = resolveFuncCall(loc, sc, assign, NULL, er, &al, 1);
+                 f = resolveFuncCall(loc, sc, assign, NULL, type, &ar, 1);
+        if (!f)  f = resolveFuncCall(loc, sc, assign, NULL, type, &al, 1);
 
         sc = sc->pop();
         global.speculativeGag = oldspec;
@@ -344,8 +344,8 @@ FuncDeclaration *StructDeclaration::buildOpEquals(Scope *sc)
         sc = sc->push();
         sc->speculative = true;
 
-                 f = resolveFuncCall(loc, sc, eq, NULL, er, &ar, 1);
-        if (!f)  f = resolveFuncCall(loc, sc, eq, NULL, er, &al, 1);
+                 f = resolveFuncCall(loc, sc, eq, NULL, tthis, &ar, 1);
+        if (!f)  f = resolveFuncCall(loc, sc, eq, NULL, tthis, &al, 1);
 
         sc = sc->pop();
         global.speculativeGag = oldspec;
@@ -684,6 +684,7 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
 {
     //printf("AggregateDeclaration::buildDtor() %s\n", toChars());
     Expression *e = NULL;
+    StorageClass stc = 0;
 
 #if DMDV2
     for (size_t i = 0; i < fields.dim; i++)
@@ -704,10 +705,17 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
         {   TypeStruct *ts = (TypeStruct *)tv;
             StructDeclaration *sd = ts->sym;
             if (sd->dtor && dim)
-            {   Expression *ex;
+            {
+                stc |= sd->dtor->storage_class & (STCdisable | STC_FUNCATTR);
+
+                if (stc & STCdisable)
+                {
+                    e = NULL;
+                    break;
+                }
 
                 // this.v
-                ex = new ThisExp(0);
+                Expression *ex = new ThisExp(0);
                 ex = new DotVarExp(0, ex, v, 0);
 
                 if (v->type->toBasetype()->ty == Tstruct)
@@ -733,9 +741,9 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
 
     /* Build our own "destructor" which executes e
      */
-    if (e)
+    if (e || (stc & STCdisable))
     {   //printf("Building __fieldDtor()\n");
-        DtorDeclaration *dd = new DtorDeclaration(loc, 0, Lexer::idPool("__fieldDtor"));
+        DtorDeclaration *dd = new DtorDeclaration(loc, 0, stc, Lexer::idPool("__fieldDtor"));
         dd->fbody = new ExpStatement(0, e);
         dtors.shift(dd);
         members->push(dd);
@@ -755,12 +763,18 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
             e = NULL;
             for (size_t i = 0; i < dtors.dim; i++)
             {   FuncDeclaration *fd = dtors[i];
+                stc |= fd->storage_class & STCdisable;
+                if (stc & STCdisable)
+                {
+                    e = NULL;
+                    break;
+                }
                 Expression *ex = new ThisExp(0);
                 ex = new DotVarExp(0, ex, fd, 0);
                 ex = new CallExp(0, ex);
                 e = Expression::combine(ex, e);
             }
-            DtorDeclaration *dd = new DtorDeclaration(loc, 0, Lexer::idPool("__aggrDtor"));
+            DtorDeclaration *dd = new DtorDeclaration(loc, 0, stc, Lexer::idPool("__aggrDtor"));
             dd->fbody = new ExpStatement(0, e);
             members->push(dd);
             dd->semantic(sc);

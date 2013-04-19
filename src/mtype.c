@@ -276,7 +276,7 @@ d_uns64 Type::size()
 d_uns64 Type::size(Loc loc)
 {
     error(loc, "no size for type %s", toChars());
-    return 1;
+    return SIZE_INVALID;
 }
 
 unsigned Type::alignsize()
@@ -1163,8 +1163,7 @@ Type *Type::aliasthisOf()
             }
             else if (d->isFuncDeclaration())
             {
-                Expression *ethis = this->defaultInit(0);
-                FuncDeclaration *fd = resolveFuncCall(0, NULL, d, NULL, ethis, NULL, 1);
+                FuncDeclaration *fd = resolveFuncCall(0, NULL, d, NULL, this, NULL, 1);
                 if (fd && fd->functionSemantic())
                 {
                     t = fd->type->nextOf();
@@ -1184,8 +1183,7 @@ Type *Type::aliasthisOf()
         TemplateDeclaration *td = ad->aliasthis->isTemplateDeclaration();
         if (td)
         {   assert(td->scope);
-            Expression *ethis = defaultInit(0);
-            FuncDeclaration *fd = resolveFuncCall(0, NULL, td, NULL, ethis, NULL, 1);
+            FuncDeclaration *fd = resolveFuncCall(0, NULL, td, NULL, this, NULL, 1);
             if (fd && fd->functionSemantic())
             {
                 Type *t = fd->type->nextOf();
@@ -1845,7 +1843,10 @@ Expression *Type::getProperty(Loc loc, Identifier *ident)
 #endif
     if (ident == Id::__sizeof)
     {
-        e = new IntegerExp(loc, size(loc), Type::tsize_t);
+        d_uns64 sz = size(loc);
+        if (sz == SIZE_INVALID)
+            return new ErrorExp();
+        e = new IntegerExp(loc, sz, Type::tsize_t);
     }
     else if (ident == Id::__xalignof)
     {
@@ -2212,7 +2213,7 @@ void TypeError::toCBuffer(OutBuffer *buf, Identifier *ident, HdrGenState *hgs)
     buf->writestring("_error_");
 }
 
-d_uns64 TypeError::size(Loc loc) { return 1; }
+d_uns64 TypeError::size(Loc loc) { return SIZE_INVALID; }
 Expression *TypeError::getProperty(Loc loc, Identifier *ident) { return new ErrorExp(); }
 Expression *TypeError::dotExp(Scope *sc, Expression *e, Identifier *ident) { return new ErrorExp(); }
 Expression *TypeError::defaultInit(Loc loc) { return new ErrorExp(); }
@@ -3562,7 +3563,7 @@ d_uns64 TypeSArray::size(Loc loc)
 
 Loverflow:
     error(loc, "index %lld overflow for static array", (long long)sz);
-    return 1;
+    return SIZE_INVALID;
 }
 
 unsigned TypeSArray::alignsize()
@@ -5721,14 +5722,14 @@ void TypeFunction::purityLevel()
  *      MATCHxxxx
  */
 
-MATCH TypeFunction::callMatch(Expression *ethis, Expressions *args, int flag)
+MATCH TypeFunction::callMatch(Type *tthis, Expressions *args, int flag)
 {
     //printf("TypeFunction::callMatch() %s\n", toChars());
     MATCH match = MATCHexact;           // assume exact match
     unsigned wildmatch = 0;
 
-    if (ethis)
-    {   Type *t = ethis->type;
+    if (tthis)
+    {   Type *t = tthis;
         if (t->toBasetype()->ty == Tpointer)
             t = t->toBasetype()->nextOf();      // change struct* to struct
         if (t->mod != mod)
@@ -5815,6 +5816,8 @@ MATCH TypeFunction::callMatch(Expression *ethis, Expressions *args, int flag)
         {
         Expression *arg = (*args)[u];
         assert(arg);
+        if (Expression *e = arg->isTemp())
+            arg = e;
 
         if (arg->op == TOKfunction)
         {
@@ -6289,7 +6292,7 @@ void TypeQualified::toCBuffer2Helper(OutBuffer *buf, HdrGenState *hgs)
 d_uns64 TypeQualified::size(Loc loc)
 {
     error(this->loc, "size of type %s is not known", toChars());
-    return 1;
+    return SIZE_INVALID;
 }
 
 /*************************************
@@ -7166,7 +7169,7 @@ d_uns64 TypeEnum::size(Loc loc)
     if (!sym->memtype)
     {
         error(loc, "enum %s is forward referenced", sym->toChars());
-        return 4;
+        return SIZE_INVALID;
     }
     return sym->memtype->size(loc);
 }

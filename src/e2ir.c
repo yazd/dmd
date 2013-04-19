@@ -41,7 +41,7 @@
 #include        "id.h"
 #include        "type.h"
 #include        "toir.h"
-
+#include        "ctfe.h"
 static char __file__[] = __FILE__;      /* for tassert.h                */
 #include        "tassert.h"
 
@@ -471,7 +471,8 @@ elem *array_toPtr(Type *t, elem *e)
             break;
 
         case Tsarray:
-            e = el_una(OPaddr, TYnptr, e);
+            //e = el_una(OPaddr, TYnptr, e);
+            e = addressElem(e, t);
             break;
 
         default:
@@ -2146,6 +2147,7 @@ elem *AssertExp::toElem(IRState *irs)
 
 elem *PostExp::toElem(IRState *irs)
 {
+    //printf("PostExp::toElem() '%s'\n", toChars());
     elem *e = e1->toElem(irs);
     elem *einc = e2->toElem(irs);
     e = el_bin((op == TOKplusplus) ? OPpostinc : OPpostdec,
@@ -2720,6 +2722,97 @@ elem *AssignExp::toElem(IRState *irs)
         SliceExp *are = (SliceExp *)(e1);
         Type *t1 = t1b;
         Type *t2 = e2->type->toBasetype();
+        Type *ta = are->e1->type->toBasetype();
+
+        /* Optimize static array assignment with array literal.
+         * Rewrite:
+         *      sa[] = [a, b, ...];
+         * as:
+         *      sa[0] = a, sa[1] = b, ...;
+         *
+         * If the same values are contiguous, that will be rewritten
+         * to block assignment.
+         * Rewrite:
+         *      sa[] = [x, a, a, b, ...];
+         * as:
+         *      sa[0] = x, sa[1..2] = a, sa[3] = b, ...;
+         */
+        if (are->lwr == NULL && ta->ty == Tsarray &&
+            e2->op == TOKarrayliteral &&
+            t2->nextOf()->mutableOf()->implicitConvTo(ta->nextOf()))
+        {
+            ArrayLiteralExp *ae = (ArrayLiteralExp *)e2;
+            TypeSArray *tsa = (TypeSArray *)ta;
+
+            size_t dim = ae->elements->dim;
+            if (dim == 0)
+            {
+                goto Lx;
+            #if 0
+                /* This code doesn't work with -O switch. Because backend optimizer
+                 * will eliminate this useless initializing code for zero-length
+                 * static array completely, then the variable kept in "unset".
+                 * Instead to fallback to the __d_arrayliteral call.
+                 */
+                symbol *stmp = symbol_genauto(TYnptr);
+                e = are->e1->toElem(irs);
+                e = addressElem(e, tsa);
+                e = el_bin(OPeq, TYnptr, el_var(stmp), e);
+
+                elem *e1 = el_var(stmp);
+                e1 = el_una(OPind, tsa->totym(), e1);
+                e1->ET = tsa->toCtype();
+                elem *e2 = el_long(tsa->totym(), 0);
+
+                elem *ex = el_bin(OPstreq, TYstruct, e1, e2);
+                ex->ET = tsa->toCtype();
+                e = el_combine(e, ex);
+                goto Lret;
+            #endif
+            }
+
+            Type *tn = tsa->nextOf()->toBasetype();
+            tym_t ty = tn->totym();
+
+            symbol *stmp = symbol_genauto(TYnptr);
+            e = are->e1->toElem(irs);
+            e = addressElem(e, tsa);
+            e = el_bin(OPeq, TYnptr, el_var(stmp), e);
+
+            size_t esz = tn->size();
+            for (size_t i = 0; i < dim; )
+            {
+                Expression *en = (*ae->elements)[i];
+                size_t j = i + 1;
+                while (j < dim && en->equals((*ae->elements)[j])) { j++; }
+
+                elem *e1 = el_var(stmp);
+                if (i > 0)
+                    e1 = el_bin(OPadd, TYnptr, e1, el_long(TYsize_t, i * esz));
+                elem *ex;
+                if (j == i + 1)
+                {
+                    e1 = el_una(OPind, ty, e1);
+                    if (tybasic(ty) == TYstruct)
+                        e1->ET = tn->toCtype();
+                    ex = el_bin(OPeq, e1->Ety, e1, en->toElem(irs));
+                    if (tybasic(ty) == TYstruct)
+                    {   ex->Eoper = OPstreq;
+                        ex->ET = tn->toCtype();
+                    }
+                }
+                else
+                {
+                    assert(j - i >= 2);
+                    elem *edim = el_long(TYsize_t, j - i);
+                    ex = setArray(e1, edim, tn, en->toElem(irs), irs, op);
+                }
+                e = el_combine(e, ex);
+                i = j;
+            }
+            goto Lret;
+        }
+    Lx:
 
         // which we do if the 'next' types match
         if (ismemset)
@@ -2729,7 +2822,6 @@ elem *AssignExp::toElem(IRState *irs)
             elem *enbytes;
             elem *elength;
             elem *einit;
-            Type *ta = are->e1->type->toBasetype();
             Type *tb = ta->nextOf()->toBasetype();
             unsigned sz = tb->size();
             tym_t tym = type->totym();
@@ -3781,11 +3873,25 @@ elem *CallExp::toElem(IRState *irs)
 elem *AddrExp::toElem(IRState *irs)
 {
     //printf("AddrExp::toElem('%s')\n", toChars());
-    elem *e = e1->toElem(irs);
-    e = addressElem(e, e1->type);
-    e->Ety = type->totym();
-    el_setLoc(e,loc);
-    return e;
+    if (e1->op == TOKstructliteral)
+    {
+        StructLiteralExp *sl = (StructLiteralExp*)e1;
+        //printf("AddrExp::toElem('%s') %d\n", toChars(), this);
+        //printf("StructLiteralExp(%p); origin:%p\n", sl, sl->origin);
+        //printf("sl->toSymbol() (%p)\n", sl->toSymbol());
+        elem *e = el_ptr(sl->origin->toSymbol());
+        e->ET = type->toCtype();
+        el_setLoc(e,loc);
+        return e;
+    }
+    else
+    {
+        elem *e = e1->toElem(irs);
+        e = addressElem(e, e1->type);
+        e->Ety = type->totym();
+        el_setLoc(e,loc);
+        return e;
+    }
 }
 
 elem *PtrExp::toElem(IRState *irs)
@@ -4633,6 +4739,8 @@ elem *ArrayLengthExp::toElem(IRState *irs)
 elem *SliceExp::toElem(IRState *irs)
 {
     //printf("SliceExp::toElem()\n");
+    Type *tb = type->toBasetype();
+    assert(tb->ty == Tarray || tb->ty == Tsarray && lwr);
     Type *t1 = e1->type->toBasetype();
     elem *e = e1->toElem(irs);
     if (lwr)
@@ -4717,7 +4825,14 @@ elem *SliceExp::toElem(IRState *irs)
         elem *elength = el_bin(OPmin, TYsize_t, eupr, elwr2);
         eptr = el_bin(OPadd, TYnptr, eptr, el_bin(OPmul, TYsize_t, el_copytree(elwr2), el_long(TYsize_t, sz)));
 
-        e = el_pair(TYdarray, elength, eptr);
+        if (tb->ty == Tarray)
+            e = el_pair(TYdarray, elength, eptr);
+        else
+        {   assert(tb->ty == Tsarray);
+            e = el_una(OPind, type->totym(), eptr);
+            if (tybasic(e->Ety) == TYstruct)
+                e->ET = type->toCtype();
+        }
         e = el_combine(elwr, e);
         e = el_combine(einit, e);
     }
@@ -5203,7 +5318,7 @@ elem *StructLiteralExp::toElem(IRState *irs)
             {
                 if (t2b->implicitConvTo(t1b))
                 {
-#if DMDV2
+#if 0
                     // Determine if postblit is needed
                     int postblit = 0;
                     if (needsPostblit(t1b))
@@ -5252,7 +5367,7 @@ elem *StructLiteralExp::toElem(IRState *irs)
                 {   e1->Eoper = OPstreq;
                     e1->ET = v->type->toCtype();
                 }
-#if DMDV2
+#if 0
                 /* Call postblit() on e1
                  */
                 StructDeclaration *sd = needsPostblit(v->type);
@@ -5378,3 +5493,15 @@ elem *appendDtors(IRState *irs, elem *er, size_t starti, size_t endi)
     return er;
 }
 
+/*****************************************************/
+/*                   CTFE stuff                      */
+/*****************************************************/
+
+elem *ClassReferenceExp::toElem(IRState *irs)
+{
+#if 0
+    printf("ClassReferenceExp::toElem() %p, value=%p, %s\n", this, value, toChars());
+#endif
+    elem *e = el_ptr(toSymbol());
+    return e;
+}

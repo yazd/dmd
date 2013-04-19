@@ -3,18 +3,20 @@ import core.vararg;
 
 extern (C) int printf(const(char*) fmt, ...);
 
+template TypeTuple(T...) { alias TypeTuple = T; }
+
+/**********************************/
+
 int sdtor;
 
-struct S
+struct S1
 {
     ~this() { printf("~S()\n"); sdtor++; }
 }
 
-/**********************************/
-
 void test1()
 {
-    S* s = new S();
+    S1* s = new S1();
     delete s;
     assert(sdtor == 1);
 }
@@ -1089,11 +1091,11 @@ struct S41 {
 
 void test41()
 {
-    auto s = new S41(3);
+    auto s = new immutable S41(3);
     //writeln(typeid(typeof(s)));
     static assert(is(typeof(s) == immutable(S41)*));
 
-    auto t = S41(3);
+    auto t = immutable S41(3);
     //writeln(typeid(typeof(t)));
     static assert(is(typeof(t) == immutable(S41)));
 }
@@ -1107,9 +1109,9 @@ class C42 {
 
 void test42()
 {
-    auto c = new C42(3);
+    static assert(!__traits(compiles, new C42(3)));
     //writeln(typeid(typeof(c)));
-    static assert(is(typeof(c) == immutable(C42)));
+    //static assert(is(typeof(c) == immutable(C42)));
 
     auto d = new immutable(C42)(3);
     //writeln(typeid(typeof(d)));
@@ -2388,6 +2390,101 @@ Foo9320 test9320(Foo9320 a, Foo9320 b, Foo9320 c) {
 }
 
 /**********************************/
+// 9386
+
+struct Test9386
+{
+    string name;
+    static string op;
+
+    this(string name)
+    {
+        this.name = name;
+        printf("Created %.*s...\n", name.length, name.ptr);
+        op ~= "a";
+    }
+
+    this(this)
+    {
+        printf("Copied %.*s...\n", name.length, name.ptr);
+        op ~= "b";
+    }
+
+    ~this()
+    {
+        printf("Deleted %.*s\n", name.length, name.ptr);
+        op ~= "c";
+    }
+}
+
+void test9386()
+{
+    {
+        Test9386.op = null;
+
+        Test9386[] tests =
+            [ Test9386("one"),
+              Test9386("two"),
+              Test9386("three"),
+              Test9386("four") ];
+
+        assert(Test9386.op == "aaaa");
+        Test9386.op = null;
+
+        printf("----\n");
+        foreach (Test9386 test; tests)
+        {
+            printf("\tForeach %.*s\n", test.name.length, test.name.ptr);
+            Test9386.op ~= "x";
+        }
+
+        assert(Test9386.op == "bxcbxcbxcbxc");
+        Test9386.op = null;
+
+        printf("----\n");
+        foreach (ref Test9386 test; tests)
+        {
+            printf("\tForeach %.*s\n", test.name.length, test.name.ptr);
+            Test9386.op ~= "x";
+        }
+        assert(Test9386.op == "xxxx");
+    }
+    printf("====\n");
+    {
+        Test9386.op = null;
+
+        Test9386[Test9386] tests =
+            [ Test9386("1") : Test9386("one"),
+              Test9386("2") : Test9386("two"),
+              Test9386("3") : Test9386("three"),
+              Test9386("4") : Test9386("four") ];
+
+        assert(Test9386.op == "aaaaaaaa");
+        Test9386.op = null;
+
+        printf("----\n");
+        foreach (Test9386 k, Test9386 v; tests)
+        {
+            printf("\tForeach %.*s : %.*s\n", k.name.length, k.name.ptr,
+                                              v.name.length, v.name.ptr);
+            Test9386.op ~= "x";
+        }
+
+        assert(Test9386.op == "bbxccbbxccbbxccbbxcc");
+        Test9386.op = null;
+
+        printf("----\n");
+        foreach (Test9386 k, ref Test9386 v; tests)
+        {
+            printf("\tForeach %.*s : %.*s\n", k.name.length, k.name.ptr,
+                                              v.name.length, v.name.ptr);
+            Test9386.op ~= "x";
+        }
+        assert(Test9386.op == "bxcbxcbxcbxc");
+    }
+}
+
+/**********************************/
 // 9441
 
 auto x9441 = X9441(0.123);
@@ -2448,6 +2545,88 @@ void test9720()
     auto a = Data(1);
     auto b = Data(1);
     a._store._payload.insertBack(b); //Fails
+}
+
+/**********************************/
+// 9899
+
+struct S9899
+{
+    @safe pure nothrow ~this() {}
+}
+
+struct MemberS9899
+{
+    S9899 s;
+}
+
+void test9899() @safe pure nothrow
+{
+    MemberS9899 s; // 11
+}
+
+/**********************************/
+// 9907
+
+void test9907()
+{
+    static struct SX(bool hasCtor, bool hasDtor)
+    {
+        int i;
+        static size_t assign;
+        static size_t dtor;
+
+        static if (hasCtor)
+        {
+            this(int i) { this.i = i; }
+        }
+
+        void opAssign(SX rhs)
+        {
+            printf("%08X(%d) from Rvalue %08X(%d)\n", &this.i, this.i, &rhs.i, rhs.i);
+            ++assign;
+        }
+
+        void opAssign(ref SX rhs)
+        {
+            printf("%08X(%d) from Lvalue %08X(%d)\n", &this.i, this.i, &rhs.i, rhs.i);
+            assert(0);
+        }
+
+        static if (hasDtor)
+        {
+            ~this()
+            {
+                printf("destroying %08X(%d)\n", &this.i, this.i);
+                ++dtor;
+            }
+        }
+    }
+
+    S test(S)(int i)
+    {
+        return S(i);
+    }
+
+    foreach (hasCtor; TypeTuple!(false, true))
+    foreach (hasDtor; TypeTuple!(false, true))
+    {
+        alias S = SX!(hasCtor, hasDtor);
+        alias test!S foo;
+
+        printf("----\n");
+        auto s = S(1);
+
+        // Assignment from two kinds of rvalues
+        assert(S.assign == 0);
+        s = foo(2);
+        static if (hasDtor) assert(S.dtor == 1);
+        assert(S.assign == 1);
+        s = S(3);
+        assert(S.assign == 2);
+        static if (hasDtor) assert(S.dtor == 2);
+    }
+    printf("----\n");
 }
 
 /**********************************/
@@ -2533,8 +2712,11 @@ int main()
     test7579b();
     test8335();
     test8356();
+    test9386();
     test9441();
     test9720();
+    test9899();
+    test9907();
 
     printf("Success\n");
     return 0;

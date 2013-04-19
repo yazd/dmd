@@ -235,6 +235,8 @@ struct Type : Object
     char *toChars();
     static char needThisPrefix();
     static void init();
+
+    #define SIZE_INVALID (~(d_uns64)0)
     d_uns64 size();
     virtual d_uns64 size(Loc loc);
     virtual unsigned alignsize();
@@ -675,7 +677,7 @@ struct TypeFunction : TypeNext
     bool parameterEscapes(Parameter *p);
     Type *addStorageClass(StorageClass stc);
 
-    MATCH callMatch(Expression *ethis, Expressions *toargs, int flag = 0);
+    MATCH callMatch(Type *tthis, Expressions *toargs, int flag = 0);
     type *toCtype();
     enum RET retStyle();
 
