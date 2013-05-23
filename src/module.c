@@ -27,7 +27,7 @@
 #include "d-dmd-gcc.h"
 #endif
 
-ClassDeclaration *Module::moduleinfo;
+AggregateDeclaration *Module::moduleinfo;
 
 Module *Module::rootModule;
 DsymbolTable *Module::modules;
@@ -63,7 +63,6 @@ Module::Module(char *filename, Identifier *ident, int doDocComment, int doHdrGen
     semanticstarted = 0;
     semanticRun = 0;
     decldefs = NULL;
-    vmoduleinfo = NULL;
     massert = NULL;
     munittest = NULL;
     marray = NULL;
@@ -304,11 +303,11 @@ bool Module::read(Loc loc)
                 for (size_t i = 0; i < global.path->dim; i++)
                 {
                     char *p = (*global.path)[i];
-                    fprintf(stdmsg, "import path[%llu] = %s\n", (ulonglong)i, p);
+                    fprintf(stderr, "import path[%llu] = %s\n", (ulonglong)i, p);
                 }
             }
             else
-                fprintf(stdmsg, "Specify path to file '%s' with -I switch\n", srcfile->toChars());
+                fprintf(stderr, "Specify path to file '%s' with -I switch\n", srcfile->toChars());
             fatal();
         }
         return false;
@@ -513,14 +512,6 @@ void Module::parse()
         }
     }
 
-#ifdef IN_GCC
-    // dump utf-8 encoded source
-    if (global.params.dump_source)
-    {   // %% srcname could contain a path ...
-        d_gcc_dump_source(srcname, "utf-8", buf, buflen);
-    }
-#endif
-
     /* If it starts with the string "Ddoc", then it's a documentation
      * source file.
      */
@@ -623,7 +614,7 @@ void Module::importAll(Scope *prevsc)
     // would fail inside object.d.
     if (members->dim == 0 || ((*members)[0])->ident != Id::object)
     {
-        Import *im = new Import(0, NULL, Id::object, NULL, 0);
+        Import *im = new Import(Loc(), NULL, Id::object, NULL, 0);
         members->shift(im);
     }
 
@@ -888,7 +879,7 @@ Dsymbol *Module::search(Loc loc, Identifier *ident, int flags)
 
 Dsymbol *Module::symtabInsert(Dsymbol *s)
 {
-    searchCacheIdent = 0;       // symbol is inserted, so invalidate cache
+    searchCacheIdent = NULL;       // symbol is inserted, so invalidate cache
     return Package::symtabInsert(s);
 }
 

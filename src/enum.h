@@ -18,18 +18,20 @@
 #include "root.h"
 #include "dsymbol.h"
 
-struct Identifier;
-struct Type;
-struct Expression;
+class Identifier;
+class Type;
+class Expression;
 struct HdrGenState;
+class VarDeclaration;
 
-
-struct EnumDeclaration : ScopeDsymbol
-{   /* enum ident : memtype { ... }
+class EnumDeclaration : public ScopeDsymbol
+{
+public:
+    /* enum ident : memtype { ... }
      */
     Type *type;                 // the TypeEnum
     Type *memtype;              // type of the members
-    enum PROT protection;
+    PROT protection;
 
 #if DMDV1
     dinteger_t maxval;
@@ -75,17 +77,20 @@ struct EnumDeclaration : ScopeDsymbol
 };
 
 
-struct EnumMember : Dsymbol
+class EnumMember : public Dsymbol
 {
+public:
     EnumDeclaration *ed;
     Expression *value;
     Type *type;
+    VarDeclaration *vd;
 
     EnumMember(Loc loc, Identifier *id, Expression *value, Type *type);
     Dsymbol *syntaxCopy(Dsymbol *s);
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
     const char *kind();
     void semantic(Scope *sc);
+    Expression *getVarExp(Loc loc, Scope *sc);
 
     void emitComment(Scope *sc);
     void toJson(JsonOut *json);

@@ -53,13 +53,13 @@ private:
        the stack might not be empty when CTFE begins.
 
        Ctfe Stack addresses are just 0-based integers, but we save
-       them as 'void *' because ArrayBase can only do pointers.
+       them as 'void *' because Array can only do pointers.
     */
     Expressions values;   // values on the stack
     VarDeclarations vars; // corresponding variables
-    ArrayBase<void> savedId; // id of the previous state of that var
+    Array<void> savedId; // id of the previous state of that var
 
-    ArrayBase<void> frames;  // all previous frame pointers
+    Array<void> frames;  // all previous frame pointers
     Expressions savedThis;   // all previous values of localThis
 
     /* Global constants get saved here after evaluation, so we never
@@ -1754,16 +1754,12 @@ Expression *getVarExp(Loc loc, InterState *istate, Declaration *d, CtfeGoal goal
     }
     else if (s)
     {   // Struct static initializers, for example
-        if (s->dsym->toInitializer() == s->sym)
-        {   e = s->dsym->type->defaultInitLiteral(loc);
-            e = e->semantic(NULL);
-            if (e->op == TOKerror)
-                e = EXP_CANT_INTERPRET;
-            else // Convert NULL to VoidExp
-                e = e->interpret(istate, goal);
-        }
-        else
-            error(loc, "cannot interpret symbol %s at compile time", s->toChars());
+        e = s->dsym->type->defaultInitLiteral(loc);
+        e = e->semantic(NULL);
+        if (e->op == TOKerror)
+            e = EXP_CANT_INTERPRET;
+        else // Convert NULL to VoidExp
+            e = e->interpret(istate, goal);
     }
     else
         error(loc, "cannot interpret declaration %s at compile time", d->toChars());
@@ -2287,31 +2283,26 @@ Expression *NewExp::interpret(InterState *istate, CtfeGoal goal)
     return EXP_CANT_INTERPRET;
 }
 
-Expression *UnaExp::interpretCommon(InterState *istate,  CtfeGoal goal, Expression *(*fp)(Type *, Expression *))
+Expression *UnaExp::interpret(InterState *istate,  CtfeGoal goal)
 {   Expression *e;
     Expression *e1;
 
 #if LOG
-    printf("%s UnaExp::interpretCommon() %s\n", loc.toChars(), toChars());
+    printf("%s UnaExp::interpret() %s\n", loc.toChars(), toChars());
 #endif
     e1 = this->e1->interpret(istate);
     if (exceptionOrCantInterpret(e1))
         return e1;
-    e = (*fp)(type, e1);
+    switch(op)
+    {
+    case TOKneg:    e = Neg(type, e1); break;
+    case TOKtilde:  e = Com(type, e1); break;
+    case TOKnot:    e = Not(type, e1); break;
+    case TOKtobool: e = Bool(type, e1); break;
+    default: assert(0);
+    }
     return e;
 }
-
-#define UNA_INTERPRET(op) \
-Expression *op##Exp::interpret(InterState *istate, CtfeGoal goal)  \
-{                                                                  \
-    return interpretCommon(istate, goal, &op);                     \
-}
-
-UNA_INTERPRET(Neg)
-UNA_INTERPRET(Com)
-UNA_INTERPRET(Not)
-UNA_INTERPRET(Bool)
-
 
 typedef Expression *(*fp_t)(Type *, Expression *, Expression *);
 
@@ -2379,30 +2370,7 @@ Lcant:
     return EXP_CANT_INTERPRET;
 }
 
-#define BIN_INTERPRET(op) \
-Expression *op##Exp::interpret(InterState *istate, CtfeGoal goal) \
-{                                                                 \
-    return interpretCommon(istate, goal, &op);                    \
-}
-
-BIN_INTERPRET(Add)
-BIN_INTERPRET(Min)
-BIN_INTERPRET(Mul)
-BIN_INTERPRET(Div)
-BIN_INTERPRET(Mod)
-BIN_INTERPRET(Shl)
-BIN_INTERPRET(Shr)
-BIN_INTERPRET(Ushr)
-BIN_INTERPRET(And)
-BIN_INTERPRET(Or)
-BIN_INTERPRET(Xor)
-#if DMDV2
-BIN_INTERPRET(Pow)
-#endif
-
-
-typedef int (*fp2_t)(Loc loc, enum TOK, Expression *, Expression *);
-
+typedef int (*fp2_t)(Loc loc, TOK, Expression *, Expression *);
 
 Expression *BinExp::interpretCompareCommon(InterState *istate, CtfeGoal goal, fp2_t fp)
 {
@@ -2455,15 +2423,48 @@ Expression *BinExp::interpretCompareCommon(InterState *istate, CtfeGoal goal, fp
     return new IntegerExp(loc, cmp, type);
 }
 
-#define BIN_INTERPRET2(op, opfunc) \
-Expression *op##Exp::interpret(InterState *istate, CtfeGoal goal)  \
-{                                                                  \
-    return interpretCompareCommon(istate, goal, &opfunc);                \
+Expression *BinExp::interpret(InterState *istate, CtfeGoal goal)
+{
+    switch(op)
+    {
+    case TOKadd:  return interpretCommon(istate, goal, &Add);
+    case TOKmin:  return interpretCommon(istate, goal, &Min);
+    case TOKmul:  return interpretCommon(istate, goal, &Mul);
+    case TOKdiv:  return interpretCommon(istate, goal, &Div);
+    case TOKmod:  return interpretCommon(istate, goal, &Mod);
+    case TOKshl:  return interpretCommon(istate, goal, &Shl);
+    case TOKshr:  return interpretCommon(istate, goal, &Shr);
+    case TOKushr: return interpretCommon(istate, goal, &Ushr);
+    case TOKand:  return interpretCommon(istate, goal, &And);
+    case TOKor:   return interpretCommon(istate, goal, &Or);
+    case TOKxor:  return interpretCommon(istate, goal, &Xor);
+#if DMDV2
+    case TOKpow:  return interpretCommon(istate, goal, &Pow);
+#endif
+    case TOKequal:
+    case TOKnotequal:
+        return interpretCompareCommon(istate, goal, &ctfeEqual);
+    case TOKidentity:
+    case TOKnotidentity:
+        return interpretCompareCommon(istate, goal, &ctfeIdentity);
+    case TOKlt:
+    case TOKle:
+    case TOKgt:
+    case TOKge:
+    case TOKleg:
+    case TOKlg:
+    case TOKunord:
+    case TOKue:
+    case TOKug:
+    case TOKuge:
+    case TOKul:
+    case TOKule:
+        return interpretCompareCommon(istate, goal, &ctfeCmp);
+    default:
+        assert(0);
+        return NULL;
+    }
 }
-
-BIN_INTERPRET2(Equal, ctfeEqual)
-BIN_INTERPRET2(Identity, ctfeIdentity)
-BIN_INTERPRET2(Cmp, ctfeCmp)
 
 /* Helper functions for BinExp::interpretAssignCommon
  */
@@ -2492,7 +2493,6 @@ VarDeclaration * findParentVar(Expression *e)
     assert(v);
     return v;
 }
-
 
 Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_t fp, int post)
 {
@@ -2625,7 +2625,7 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
             // f() = e2, when f returns an array, is always a slice assignment.
             // Convert into arr[0..arr.length] = e2
             e1 = new SliceExp(loc, e1,
-                new IntegerExp(0, 0, Type::tsize_t),
+                new IntegerExp(Loc(), 0, Type::tsize_t),
                 ArrayLength(Type::tsize_t, e1));
             e1->type = type;
         }
@@ -3569,29 +3569,30 @@ Expression *AssignExp::interpret(InterState *istate, CtfeGoal goal)
     return interpretAssignCommon(istate, goal, NULL);
 }
 
-#define BIN_ASSIGN_INTERPRET_CTFE(op, ctfeOp) \
-Expression *op##AssignExp::interpret(InterState *istate, CtfeGoal goal) \
-{                                                                       \
-    return interpretAssignCommon(istate, goal, &ctfeOp);                    \
-}
-
-#define BIN_ASSIGN_INTERPRET(op) BIN_ASSIGN_INTERPRET_CTFE(op, op)
-
-BIN_ASSIGN_INTERPRET(Add)
-BIN_ASSIGN_INTERPRET(Min)
-BIN_ASSIGN_INTERPRET_CTFE(Cat, ctfeCat)
-BIN_ASSIGN_INTERPRET(Mul)
-BIN_ASSIGN_INTERPRET(Div)
-BIN_ASSIGN_INTERPRET(Mod)
-BIN_ASSIGN_INTERPRET(Shl)
-BIN_ASSIGN_INTERPRET(Shr)
-BIN_ASSIGN_INTERPRET(Ushr)
-BIN_ASSIGN_INTERPRET(And)
-BIN_ASSIGN_INTERPRET(Or)
-BIN_ASSIGN_INTERPRET(Xor)
+Expression *BinAssignExp::interpret(InterState *istate, CtfeGoal goal)
+{
+    switch(op)
+    {
+    case TOKaddass:  return interpretAssignCommon(istate, goal, &Add);
+    case TOKminass:  return interpretAssignCommon(istate, goal, &Min);
+    case TOKcatass:  return interpretAssignCommon(istate, goal, &ctfeCat);
+    case TOKmulass:  return interpretAssignCommon(istate, goal, &Mul);
+    case TOKdivass:  return interpretAssignCommon(istate, goal, &Div);
+    case TOKmodass:  return interpretAssignCommon(istate, goal, &Mod);
+    case TOKshlass:  return interpretAssignCommon(istate, goal, &Shl);
+    case TOKshrass:  return interpretAssignCommon(istate, goal, &Shr);
+    case TOKushrass: return interpretAssignCommon(istate, goal, &Ushr);
+    case TOKandass:  return interpretAssignCommon(istate, goal, &And);
+    case TOKorass:   return interpretAssignCommon(istate, goal, &Or);
+    case TOKxorass:  return interpretAssignCommon(istate, goal, &Xor);
 #if DMDV2
-BIN_ASSIGN_INTERPRET(Pow)
+    case TOKpowass:  return interpretAssignCommon(istate, goal, &Pow);
 #endif
+    default:
+        assert(0);
+        return NULL;
+    }
+}
 
 Expression *PostExp::interpret(InterState *istate, CtfeGoal goal)
 {
@@ -4098,6 +4099,8 @@ Expression *CallExp::interpret(InterState *istate, CtfeGoal goal)
         }
         return e;
     }
+    if (fd->dArrayOp)
+        return fd->dArrayOp->interpret(istate, arguments, pthis);
     if (!fd->fbody)
     {
         error("%s cannot be interpreted at compile time,"
@@ -5568,7 +5571,7 @@ Expression *evaluateIfBuiltin(InterState *istate, Loc loc,
     }
     if (!pthis)
     {
-        enum BUILTIN b = fd->isBuiltin();
+        BUILTIN b = fd->isBuiltin();
         if (b)
         {   Expressions args;
             args.setDim(nargs);
