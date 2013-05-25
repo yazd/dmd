@@ -177,6 +177,9 @@ void FuncDeclaration::semantic(Scope *sc)
         if (StructDeclaration *sd = ad->isStructDeclaration())
             sd->makeNested();
     }
+    // Remove prefix storage classes silently.
+    if ((storage_class & STC_TYPECTOR) && !(ad || isNested()))
+        storage_class &= ~STC_TYPECTOR;
 
     //printf("function storage_class = x%llx, sc->stc = x%llx, %x\n", storage_class, sc->stc, Declaration::isFinal());
 
@@ -195,6 +198,28 @@ void FuncDeclaration::semantic(Scope *sc)
         sc = sc->push();
         sc->stc |= storage_class & STCdisable;  // forward to function type
         TypeFunction *tf = (TypeFunction *)type;
+#if 1
+        /* If the parent is @safe, then this function defaults to safe
+         * too.
+         * If the parent's @safe-ty is inferred, then this function's @safe-ty needs
+         * to be inferred first.
+         */
+        if (tf->trust == TRUSTdefault &&
+            !(//isFuncLiteralDeclaration() ||
+              parent->isTemplateInstance() ||
+              ad && ad->parent && ad->parent->isTemplateInstance()))
+        {
+            for (Dsymbol *p = sc->func; p; p = p->toParent2())
+            {   FuncDeclaration *fd = p->isFuncDeclaration();
+                if (fd)
+                {
+                    if (fd->isSafeBypassingInference())
+                        tf->trust = TRUSTsafe;              // default to @safe
+                    break;
+                }
+            }
+        }
+#endif
         if (tf->isref)      sc->stc |= STCref;
         if (tf->isnothrow)  sc->stc |= STCnothrow;
         if (tf->isproperty) sc->stc |= STCproperty;
@@ -226,6 +251,14 @@ void FuncDeclaration::semantic(Scope *sc)
         }
 
         sc->linkage = linkage;
+
+        if (!tf->isNaked() && !(isThis() || isNested()))
+        {
+            OutBuffer buf;
+            MODtoBuffer(&buf, tf->mod);
+            error("without 'this' cannot be %s", buf.toChars());
+            tf->mod = 0;    // remove qualifiers
+        }
 
         /* Apply const, immutable, wild and shared storage class
          * to the function type. Do this before type semantic.
@@ -312,13 +345,6 @@ void FuncDeclaration::semantic(Scope *sc)
 
     if (isOverride() && !isVirtual())
         error("cannot override a non-virtual function");
-
-    if (!f->isNaked() && !(isThis() || isNested()))
-    {
-        OutBuffer buf;
-        MODtoBuffer(&buf, f->mod);
-        error("without 'this' cannot be %s", buf.toChars());
-    }
 
     if (isAbstract() && isFinal())
         error("cannot be both final and abstract");
