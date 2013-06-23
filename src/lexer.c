@@ -30,11 +30,6 @@
 #include "id.h"
 #include "module.h"
 
-#if _WIN32 && __DMC__
-// from \dm\src\include\setlocal.h
-extern "C" const char * __cdecl __locale_decpoint;
-#endif
-
 extern int HtmlNamedEntity(unsigned char *p, size_t length);
 
 #define LS 0x2028       // UTF line separator
@@ -686,6 +681,7 @@ void Lexer::scan(Token *t)
                     else if (id == Id::VERSIONX)
                     {   unsigned major = 0;
                         unsigned minor = 0;
+                        bool point = false;
 
                         for (const char *p = global.version + 1; 1; p++)
                         {
@@ -693,7 +689,11 @@ void Lexer::scan(Token *t)
                             if (isdigit((unsigned char)c))
                                 minor = minor * 10 + c - '0';
                             else if (c == '.')
-                            {   major = minor;
+                            {
+                                if (point)
+                                    break;      // ignore everything after second '.'
+                                point = true;
+                                major = minor;
                                 minor = 0;
                             }
                             else
@@ -2346,47 +2346,25 @@ done:
 
     stringbuffer.writeByte(0);
 
-#if _WIN32 && __DMC__
-    const char *save = __locale_decpoint;
-    __locale_decpoint = ".";
-#endif
-#ifdef IN_GCC
-    t->float80value = real_t::parse((char *)stringbuffer.data, real_t::LongDouble);
-#else
-    t->float80value = strtold((char *)stringbuffer.data, NULL);
-#endif
+    t->float80value = Port::strtold((char *)stringbuffer.data, NULL);
     errno = 0;
     switch (*p)
     {
         case 'F':
         case 'f':
-#ifdef IN_GCC
-            real_t::parse((char *)stringbuffer.data, real_t::Float);
-#else
-            {   // Only interested in errno return
-                double d = strtof((char *)stringbuffer.data, NULL);
-                // Assign to d to keep gcc warnings at bay,
-                // but then CppCheck complains that d is never used.
-            }
-#endif
+            // Only interested in errno return
+            (void)Port::strtof((char *)stringbuffer.data, NULL);
             result = TOKfloat32v;
             p++;
             break;
 
         default:
-#ifdef IN_GCC
-            real_t::parse((char *)stringbuffer.data, real_t::Double);
-#else
             /* Should do our own strtod(), since dmc and linux gcc
              * accept 2.22507e-308, while apple gcc will only take
              * 2.22508e-308. Not sure who is right.
              */
-            {   // Only interested in errno return
-                double d = strtod((char *)stringbuffer.data, NULL);
-                // Assign to d to keep gcc warnings at bay
-                // but then CppCheck complains that d is never used.
-            }
-#endif
+            // Only interested in errno return
+            (void)Port::strtod((char *)stringbuffer.data, NULL);
             result = TOKfloat64v;
             break;
 
@@ -2416,9 +2394,6 @@ done:
             default: break;
         }
     }
-#if _WIN32 && __DMC__
-    __locale_decpoint = save;
-#endif
     if (errno == ERANGE)
         error("number is not representable");
     return result;

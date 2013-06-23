@@ -51,6 +51,20 @@ void printCtfePerformanceStats();
 
 static bool parse_arch(size_t argc, char** argv, bool is64bit);
 
+/** Normalize path by turning forward slashes into backslashes */
+void toWinPath(char *src)
+{
+    if (src == NULL)
+        return;
+
+    while (*src != '\0')
+    {
+        if (*src == '/')
+            *src = '\\';
+        src++;
+    }
+}
+
 Global global;
 
 void Global::init()
@@ -323,7 +337,7 @@ Usage:\n\
   @cmdfile       read arguments from cmdfile\n\
   -c             do not link\n\
   -cov           do code coverage analysis\n\
-  -cov=nnn       require at least %%nnn code coverage\n\
+  -cov=nnn       require at least nnn%% code coverage\n\
   -D             generate documentation\n\
   -Dddocdir      write documentation file to docdir directory\n\
   -Dffilename    write documentation file to filename\n\
@@ -335,8 +349,9 @@ Usage:\n\
   -debug=ident   compile in debug code identified by ident\n\
   -debuglib=name    set symbolic debug library to name\n\
   -defaultlib=name  set default library to name\n\
-  -deps=filename write module dependencies to filename\n%s"
-"  -g             add symbolic debug info\n\
+  -deps          print module dependencies (imports/file/version/debug/lib)\n\
+  -deps=filename write module dependencies to filename (only imports - deprecated)\n%s\
+  -g             add symbolic debug info\n\
   -gc            add symbolic debug info, pretend to be C\n\
   -gs            always emit stack frame\n\
   -gx            add stack stomp code\n\
@@ -349,12 +364,10 @@ Usage:\n\
   -inline        do function inlining\n\
   -Jpath         where to look for string imports\n\
   -Llinkerflag   pass linkerflag to link\n\
-  -lib           generate library rather than object files\n"
-#if TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
-"  -m32           generate 32 bit code\n\
-  -m64           generate 64 bit code\n"
-#endif
-"  -main          add default main() (e.g. for unittesting)\n\
+  -lib           generate library rather than object files\n\
+  -m32           generate 32 bit code\n\
+  -m64           generate 64 bit code\n\
+  -main          add default main() (e.g. for unittesting)\n\
   -man           open web browser on manual page\n\
   -map           generate linker .map file\n\
   -noboundscheck turns off array bounds checking for all functions\n\
@@ -682,12 +695,18 @@ Language changes listed by -transition=id:\n\
                     case 'd':
                         if (!p[3])
                             goto Lnoarg;
+#if _WIN32
+                        toWinPath(p + 3);
+#endif
                         global.params.objdir = p + 3;
                         break;
 
                     case 'f':
                         if (!p[3])
                             goto Lnoarg;
+#if _WIN32
+                        toWinPath(p + 3);
+#endif
                         global.params.objname = p + 3;
                         break;
 
@@ -882,11 +901,23 @@ Language changes listed by -transition=id:\n\
                 setdebuglib = 1;
                 global.params.debuglibname = p + 1 + 9;
             }
-            else if (memcmp(p + 1, "deps=", 5) == 0)
+            else if (memcmp(p + 1, "deps", 4) == 0)
             {
-                global.params.moduleDepsFile = p + 1 + 5;
-                if (!global.params.moduleDepsFile[0])
-                    goto Lnoarg;
+                if(global.params.moduleDeps)
+                {
+                    error(Loc(), "-deps[=file] can only be provided once!");
+                    break;
+                }
+                if (p[5] == '=')
+                {
+                    global.params.moduleDepsFile = p + 1 + 5;
+                    if (!global.params.moduleDepsFile[0])
+                        goto Lnoarg;
+                } // Else output to stdout.
+                else if (p[5]!='\0')
+                {
+                    goto Lerror;
+                }
                 global.params.moduleDeps = new OutBuffer;
             }
             else if (strcmp(p + 1, "main") == 0)
@@ -1338,7 +1369,7 @@ Language changes listed by -transition=id:\n\
     for (size_t i = 0; i < modules.dim; i++)
     {
         m = modules[i];
-        m->read(0);
+        m->read(Loc());
     }
 #endif
 
@@ -1489,14 +1520,17 @@ Language changes listed by -transition=id:\n\
         }
     }
 
-    if (global.params.moduleDeps != NULL)
+    if (global.params.moduleDeps)
     {
-        assert(global.params.moduleDepsFile != NULL);
-
-        File deps(global.params.moduleDepsFile);
         OutBuffer* ob = global.params.moduleDeps;
-        deps.setbuffer((void*)ob->data, ob->offset);
-        deps.writev();
+        if (global.params.moduleDepsFile) 
+        {
+            File deps(global.params.moduleDepsFile);
+            deps.setbuffer((void*)ob->data, ob->offset);
+            deps.writev();
+        }
+        else
+            printf("%.*s", ob->offset, ob->data);
     }
 
     // Scan for functions to inline
@@ -1651,8 +1685,7 @@ Language changes listed by -transition=id:\n\
                  */
                 for (size_t i = 0; i < modules.dim; i++)
                 {
-                    Module *m = modules[i];
-                    m->deleteObjFile();
+                    modules[i]->deleteObjFile();
                     if (global.params.oneobj)
                         break;
                 }
@@ -1787,6 +1820,27 @@ Ldone:
     *pargc = argc;
     *pargv = argv->tdata();
 }
+
+void escapePath(OutBuffer *buf, const char *fname)
+{
+    while (1)
+    {
+        switch (*fname)
+        {
+            case 0:
+                return;
+            case '(':
+            case ')':
+            case '\\':
+                buf->writebyte('\\');
+            default:
+                buf->writebyte(*fname);
+                break;
+        }
+        fname++;
+    }
+}
+
 
 /***********************************
  * Parse command line arguments for -m32 or -m64

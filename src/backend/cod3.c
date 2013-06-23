@@ -502,8 +502,8 @@ void cod3_buildmodulector(Outbuffer* buf, int codeOffset, int refOffset)
         buf->writeByte(REX | REX_W);
         buf->writeByte(LEA);
         buf->writeByte(modregrm(0,AX,5));
-        buf->write32(refOffset);
-        ElfObj::addrel(seg, codeOffset + 3, R_X86_64_PC32, 3 /*STI_DATA*/, -4);
+        buf->write32(0);
+        ElfObj::addrel(seg, codeOffset + 3, R_X86_64_PC32, 3 /*STI_DATA*/, refOffset - 4);
 
         // MOV RCX,_DmoduleRef@GOTPCREL[RIP]
         buf->writeByte(REX | REX_W);
@@ -518,8 +518,19 @@ void cod3_buildmodulector(Outbuffer* buf, int codeOffset, int refOffset)
 
         /* movl ModuleReference*, %eax */
         buf->writeByte(0xB8);
-        buf->write32(refOffset);
-        ElfObj::addrel(seg, codeOffset + 1, reltype, 3 /*STI_DATA*/, 0);
+        if (I64)
+        {
+            // Elf64 uses only the explicit addends of a relocation.
+            // It seems like ld.bfd still adds the value at the to be relocated address,
+            // but ld.gold does not.
+            buf->write32(0);
+            ElfObj::addrel(seg, codeOffset + 1, reltype, 3 /*STI_DATA*/, refOffset);
+        }
+        else
+        {
+            buf->write32(refOffset);
+            ElfObj::addrel(seg, codeOffset + 1, reltype, 3 /*STI_DATA*/, 0);
+        }
 
         /* movl _Dmodule_ref, %ecx */
         buf->writeByte(0xB9);

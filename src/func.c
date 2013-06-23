@@ -1328,7 +1328,7 @@ void FuncDeclaration::semantic3(Scope *sc)
                 int nothrowErrors = global.errors;
                 int blockexit = fbody->blockExit(f->isnothrow);
                 if (f->isnothrow && (global.errors != nothrowErrors) )
-                    error("'%s' is nothrow yet may throw", toChars());
+                    ::error(loc, "%s '%s' is nothrow yet may throw", kind(), toPrettyChars());
                 if (flags & FUNCFLAGnothrowInprocess)
                     f->isnothrow = !(blockexit & BEthrow);
 #endif
@@ -1416,7 +1416,7 @@ void FuncDeclaration::semantic3(Scope *sc)
                 int nothrowErrors = global.errors;
                 int blockexit = fbody->blockExit(f->isnothrow);
                 if (f->isnothrow && (global.errors != nothrowErrors) )
-                    error("'%s' is nothrow yet may throw", toChars());
+                    ::error(loc, "%s '%s' is nothrow yet may throw", kind(), toPrettyChars());
                 if (flags & FUNCFLAGnothrowInprocess)
                 {
                     if (type == f) f = f->copy();
@@ -1692,7 +1692,7 @@ void FuncDeclaration::semantic3(Scope *sc)
                         bool isnothrow = f->isnothrow & !(flags & FUNCFLAGnothrowInprocess);
                         int blockexit = s->blockExit(isnothrow);
                         if (f->isnothrow && (global.errors != nothrowErrors) )
-                            error("'%s' is nothrow yet may throw", toChars());
+                            ::error(loc, "%s '%s' is nothrow yet may throw", kind(), toPrettyChars());
                         if (flags & FUNCFLAGnothrowInprocess && blockexit & BEthrow)
                             f->isnothrow = FALSE;
                         if (fbody->blockExit(f->isnothrow) == BEfallthru)
@@ -1921,7 +1921,7 @@ VarDeclaration *FuncDeclaration::declareThis(Scope *sc, AggregateDeclaration *ad
     return NULL;
 }
 
-bool FuncDeclaration::equals(Object *o)
+bool FuncDeclaration::equals(RootObject *o)
 {
     if (this == o)
         return true;
@@ -3134,11 +3134,6 @@ bool FuncDeclaration::isFinal()
          ((cd = toParent()->isClassDeclaration()) != NULL && cd->storage_class & STCfinal));
 }
 
-bool FuncDeclaration::isAbstract()
-{
-    return (storage_class & STCabstract) != 0;
-}
-
 bool FuncDeclaration::isCodeseg()
 {
     return true;                // functions are always in the code segment
@@ -3755,8 +3750,8 @@ bool FuncDeclaration::hasNestedFrameRefs()
  */
 
 Parameters *FuncDeclaration::getParameters(int *pvarargs)
-{   Parameters *fparameters;
-    int fvarargs;
+{   Parameters *fparameters = NULL;
+    int fvarargs = 0;
 
     if (type)
     {
@@ -3810,20 +3805,19 @@ FuncDeclaration *FuncAliasDeclaration::toAliasFunc()
 /****************************** FuncLiteralDeclaration ************************/
 
 FuncLiteralDeclaration::FuncLiteralDeclaration(Loc loc, Loc endloc, Type *type,
-        TOK tok, ForeachStatement *fes)
+        TOK tok, ForeachStatement *fes, Identifier *id)
     : FuncDeclaration(loc, endloc, NULL, STCundefined, type)
 {
-    const char *id;
-
-    if (fes)
-        id = "__foreachbody";
-    else if (tok == TOKreserved)
-        id = "__lambda";
-    else if (tok == TOKdelegate)
-        id = "__dgliteral";
-    else
-        id = "__funcliteral";
-    this->ident = Lexer::uniqueId(id);
+    if (!id)
+    {
+        const char *s;
+        if (fes)                        s = "__foreachbody";
+        else if (tok == TOKreserved)    s = "__lambda";
+        else if (tok == TOKdelegate)    s = "__dgliteral";
+        else                            s = "__funcliteral";
+        id = Lexer::uniqueId(s);
+    }
+    this->ident = id;
     this->tok = tok;
     this->fes = fes;
     this->treq = NULL;
@@ -3832,16 +3826,22 @@ FuncLiteralDeclaration::FuncLiteralDeclaration(Loc loc, Loc endloc, Type *type,
 
 Dsymbol *FuncLiteralDeclaration::syntaxCopy(Dsymbol *s)
 {
+    return syntaxCopy(s, false);
+}
+
+Dsymbol *FuncLiteralDeclaration::syntaxCopy(Dsymbol *s, bool keepId)
+{
     FuncLiteralDeclaration *f;
 
     //printf("FuncLiteralDeclaration::syntaxCopy('%s')\n", toChars());
     if (s)
         f = (FuncLiteralDeclaration *)s;
     else
-    {   f = new FuncLiteralDeclaration(loc, endloc, type->syntaxCopy(), tok, fes);
-        f->ident = ident;               // keep old identifier
-        f->treq = treq;                 // don't need to copy
+    {
+        Identifier *id = keepId ? ident : NULL;
+        f = new FuncLiteralDeclaration(loc, endloc, type->syntaxCopy(), tok, fes, id);
     }
+    f->treq = treq;     // don't need to copy
     FuncDeclaration::syntaxCopy(f);
     return f;
 }
@@ -4537,8 +4537,6 @@ void UnitTestDeclaration::semantic(Scope *sc)
         if (!type)
             type = new TypeFunction(NULL, Type::tvoid, FALSE, LINKd);
         Scope *sc2 = sc->push();
-        // It makes no sense for unit tests to be pure or nothrow.
-        sc2->stc &= ~(STCnothrow | STCpure);
         sc2->linkage = LINKd;
         FuncDeclaration::semantic(sc2);
         sc2->pop();

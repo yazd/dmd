@@ -87,11 +87,11 @@ enum PURE;
 #define STCtemp         0x10000000000LL  // temporary variable introduced by inlining
                                          // and used only in backend process, so it's rvalue
 
-#define STCStorageClass (STCauto | STCscope | STCstatic | STCextern | STCconst | STCfinal | \
-        STCabstract | STCsynchronized | STCdeprecated | STCoverride | STClazy | STCalias | \
-        STCout | STCin | \
-        STCmanifest | STCimmutable | STCshared | STCnothrow | STCpure | STCref | STCtls | \
-        STCgshared | STCproperty | STCsafe | STCtrusted | STCsystem | STCdisable)
+const StorageClass STCStorageClass = (STCauto | STCscope | STCstatic | STCextern | STCconst | STCfinal |
+    STCabstract | STCsynchronized | STCdeprecated | STCoverride | STClazy | STCalias |
+    STCout | STCin |
+    STCmanifest | STCimmutable | STCshared | STCnothrow | STCpure | STCref | STCtls |
+    STCgshared | STCproperty | STCsafe | STCtrusted | STCsystem | STCdisable);
 
 struct Match
 {
@@ -659,7 +659,7 @@ public:
     bool functionSemantic3();
     // called from semantic3
     VarDeclaration *declareThis(Scope *sc, AggregateDeclaration *ad);
-    bool equals(Object *o);
+    bool equals(RootObject *o);
 
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
     void bodyToCBuffer(OutBuffer *buf, HdrGenState *hgs);
@@ -685,7 +685,6 @@ public:
     BUILTIN isBuiltin();
     bool isExport();
     bool isImportedSymbol();
-    bool isAbstract();
     bool isCodeseg();
     bool isOverloadable();
     bool hasOverloads();
@@ -766,9 +765,10 @@ public:
     Type *treq;                         // target of return type inference
 
     FuncLiteralDeclaration(Loc loc, Loc endloc, Type *type, TOK tok,
-        ForeachStatement *fes);
+        ForeachStatement *fes, Identifier *id = NULL);
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
     Dsymbol *syntaxCopy(Dsymbol *);
+    Dsymbol *syntaxCopy(Dsymbol *s, bool keepId);
     bool isNested();
     bool isVirtual();
 

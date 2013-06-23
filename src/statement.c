@@ -74,12 +74,13 @@ void Statement::print()
 }
 
 char *Statement::toChars()
-{   OutBuffer *buf;
+{
     HdrGenState hgs;
 
-    buf = new OutBuffer();
-    toCBuffer(buf, &hgs);
-    return buf->toChars();
+    OutBuffer buf;
+    toCBuffer(&buf, &hgs);
+    buf.writebyte(0);
+    return buf.extractData();
 }
 
 void Statement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
@@ -2072,9 +2073,9 @@ Lagain:
                  */
                 FuncDeclaration *fdapply;
                 if (dim == 2)
-                    fdapply = FuncDeclaration::genCfunc(Type::tindex, "_aaApply2");
+                    fdapply = FuncDeclaration::genCfunc(Type::tint32, "_aaApply2");
                 else
-                    fdapply = FuncDeclaration::genCfunc(Type::tindex, "_aaApply");
+                    fdapply = FuncDeclaration::genCfunc(Type::tint32, "_aaApply");
                 ec = new VarExp(Loc(), fdapply);
                 Expressions *exps = new Expressions();
                 exps->push(aggr);
@@ -2115,7 +2116,7 @@ Lagain:
                 const char *r = (op == TOKforeach_reverse) ? "R" : "";
                 int j = sprintf(fdname, "_aApply%s%.*s%llu", r, 2, fntab[flag], (ulonglong)dim);
                 assert(j < sizeof(fdname) / sizeof(fdname[0]));
-                FuncDeclaration *fdapply = FuncDeclaration::genCfunc(Type::tindex, fdname);
+                FuncDeclaration *fdapply = FuncDeclaration::genCfunc(Type::tint32, fdname);
 
                 ec = new VarExp(Loc(), fdapply);
                 Expressions *exps = new Expressions();
@@ -3017,7 +3018,8 @@ Statement *SwitchStatement::semantic(Scope *sc)
         condition->type = condition->type->constOf();
     }
     else
-    {   condition = condition->integralPromotions(sc);
+    {
+        condition = condition->integralPromotions(sc);
         if (!condition->type->isintegral())
             error("'%s' must be of integral or string type, it is a %s", condition->toChars(), condition->type->toChars());
     }
@@ -3087,8 +3089,11 @@ Statement *SwitchStatement::semantic(Scope *sc)
                 if (em)
                 {
                     for (size_t j = 0; j < cases->dim; j++)
-                    {   CaseStatement *cs = (*cases)[j];
-                        if (cs->exp->equals(em->value) || cs->exp->toInteger() == em->value->toInteger())
+                    {
+                        CaseStatement *cs = (*cases)[j];
+                        if (cs->exp->equals(em->value) ||
+                                (!cs->exp->type->isString() && !em->value->type->isString() &&
+                                cs->exp->toInteger() == em->value->toInteger()))
                             goto L1;
                     }
                     error("enum member %s not represented in final switch", em->toChars());
@@ -3271,7 +3276,7 @@ Statement *CaseStatement::semantic(Scope *sc)
     return this;
 }
 
-int CaseStatement::compare(Object *obj)
+int CaseStatement::compare(RootObject *obj)
 {
     // Sort cases so we can do an efficient lookup
     CaseStatement *cs2 = (CaseStatement *)(obj);
@@ -3316,6 +3321,12 @@ Statement *CaseRangeStatement::syntaxCopy()
 
 Statement *CaseRangeStatement::semantic(Scope *sc)
 {   SwitchStatement *sw = sc->sw;
+
+    if (sw == NULL)
+    {
+        error("case range not in switch statement");
+        return NULL;
+    }
 
     //printf("CaseRangeStatement::semantic() %s\n", toChars());
     if (sw->isFinal)
@@ -3896,18 +3907,19 @@ Statement *ReturnStatement::semantic(Scope *sc)
 
     if (exp && tbret->ty == Tvoid && !implicit0)
     {
-        /* Replace:
-         *      return exp;
-         * with:
-         *      exp; return;
-         */
-        Statement *s = new ExpStatement(loc, exp);
-        s = s->semantic(sc);
-
         if (exp->type->ty != Tvoid)
         {
             error("cannot return non-void from void function");
         }
+
+        /* Replace:
+         *      return exp;
+         * with:
+         *      cast(void)exp; return;
+         */
+        Expression *ce = new CastExp(loc, exp, Type::tvoid);
+        Statement *s = new ExpStatement(loc, ce);
+        s = s->semantic(sc);
 
         exp = NULL;
         return new CompoundStatement(loc, s, this);
@@ -4493,7 +4505,11 @@ int TryCatchStatement::blockExit(bool mustNotThrow)
         /* If we're catching Object, then there is no throwing
          */
         Identifier *id = c->type->toBasetype()->isClassHandle()->ident;
-        if (id == Id::Object || id == Id::Throwable || id == Id::Exception)
+        if (id == Id::Object || id == Id::Throwable)
+        {
+            result &= ~(BEthrow | BEerrthrow);
+        }
+        if (id == Id::Exception)
         {
             result &= ~BEthrow;
         }
@@ -4544,9 +4560,6 @@ Catch *Catch::syntaxCopy()
 
 void Catch::semantic(Scope *sc)
 {
-    if (type && type->deco)
-        return;
-
     //printf("Catch::semantic(%s)\n", ident->toChars());
 
 #ifndef IN_GCC
@@ -4831,16 +4844,19 @@ Statement *ThrowStatement::semantic(Scope *sc)
 int ThrowStatement::blockExit(bool mustNotThrow)
 {
     Type *t = exp->type->toBasetype();
-    if (mustNotThrow && t->ty != Terror)
+    if (t->ty != Terror)
     {
         ClassDeclaration *cd = t->isClassHandle();
         assert(cd);
 
+        if (cd == ClassDeclaration::errorException ||
+            ClassDeclaration::errorException->isBaseOf(cd, NULL))
+        {
+            return BEerrthrow;
+        }
         // Bugzilla 8675
         // Throwing Errors is allowed even if mustNotThrow
-        if (!internalThrow &&
-            cd != ClassDeclaration::errorException &&
-            !ClassDeclaration::errorException->isBaseOf(cd, NULL))
+        if (!internalThrow && mustNotThrow)
             error("%s is thrown but not caught", exp->type->toChars());
     }
     return BEthrow;

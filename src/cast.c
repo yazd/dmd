@@ -418,6 +418,11 @@ Lno:
     return MATCHnomatch;
 }
 
+MATCH ErrorExp::implicitConvTo(Type *t)
+{
+    return MATCHnomatch;
+}
+
 MATCH NullExp::implicitConvTo(Type *t)
 {
 #if 0
@@ -1049,6 +1054,7 @@ MATCH SliceExp::implicitConvTo(Type *t)
 
 /**************************************
  * Do an explicit cast.
+ * Assume that the 'this' expression does not have any indirections.
  */
 
 Expression *Expression::castTo(Scope *sc, Type *t)
@@ -1065,7 +1071,7 @@ Expression *Expression::castTo(Scope *sc, Type *t)
         VarDeclaration *v = ((VarExp *)this)->var->isVarDeclaration();
         if (v && v->storage_class & STCmanifest)
         {
-            Expression *e = optimize(WANTvalue | WANTinterpret);
+            Expression *e = ctfeInterpret();
             return e->castTo(sc, t);
         }
     }
@@ -1849,6 +1855,14 @@ Expression *SliceExp::castTo(Scope *sc, Type *t)
         /* If a SliceExp has Tsarray, it will become lvalue.
          * That's handled in SliceExp::isLvalue and toLvalue
          */
+        e = copy();
+        e->type = t;
+    }
+    else if (typeb->ty == Tarray && tb->ty == Tarray &&
+             typeb->nextOf()->constConv(tb->nextOf()) == MATCHconst)
+    {
+        // immutable(T)[] to const(T)[]
+        //           T [] to const(T)[]
         e = copy();
         e->type = t;
     }

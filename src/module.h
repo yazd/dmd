@@ -27,14 +27,24 @@ class Library;
 
 // Back end
 #ifdef IN_GCC
-union tree_node; typedef union tree_node elem;
+typedef union tree_node elem;
 #else
 struct elem;
 #endif
 
+enum PKG
+{
+    PKGunknown, // not yet determined whether it's a package.d or not
+    PKGmodule,  // already determined that's an actual package.d
+    PKGpackage, // already determined that's an actual package
+};
+
 class Package : public ScopeDsymbol
 {
 public:
+    PKG isPkgMod;
+    Module *mod;        // != NULL if isPkgMod == PKGmodule
+
     Package(Identifier *ident);
     const char *kind();
 

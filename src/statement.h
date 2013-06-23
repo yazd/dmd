@@ -60,8 +60,8 @@ typedef bool (*sapply_fp_t)(Statement *, void *);
 struct IRState;
 struct Blockx;
 #ifdef IN_GCC
-union tree_node; typedef union tree_node block;
-union tree_node; typedef union tree_node elem;
+typedef union tree_node block;
+typedef union tree_node elem;
 #else
 struct block;
 struct elem;
@@ -80,10 +80,11 @@ enum BE
     BEhalt =     0x10,
     BEbreak =    0x20,
     BEcontinue = 0x40,
+    BEerrthrow = 0x80,
     BEany = (BEfallthru | BEthrow | BEreturn | BEgoto | BEhalt),
 };
 
-class Statement : public Object
+class Statement : public RootObject
 {
 public:
     Loc loc;
@@ -551,7 +552,7 @@ public:
     CaseStatement(Loc loc, Expression *exp, Statement *s);
     Statement *syntaxCopy();
     Statement *semantic(Scope *sc);
-    int compare(Object *obj);
+    int compare(RootObject *obj);
     int blockExit(bool mustNotThrow);
     bool comeFromImpl();
     Expression *interpret(InterState *istate);
@@ -774,7 +775,7 @@ public:
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
 };
 
-class Catch : public Object
+class Catch : public RootObject
 {
 public:
     Loc loc;

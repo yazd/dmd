@@ -304,12 +304,7 @@ extern Global global;
  #include  <complex.h>
  typedef _Complex long double complex_t;
 #else
- #ifndef IN_GCC
-  #include "complex_t.h"
- #endif
- #ifdef __APPLE__
-  //#include "complex.h"//This causes problems with include the c++ <complex> and not the C "complex.h"
- #endif
+ #include "complex_t.h"
 #endif
 
 // Be careful not to care about sign when using dinteger_t
@@ -338,15 +333,8 @@ typedef d_uns8                  d_char;
 typedef d_uns16                 d_wchar;
 typedef d_uns32                 d_dchar;
 
-#ifdef IN_GCC
-#include "d-gcc-real.h"
-#else
 typedef longdouble real_t;
-#endif
 
-#ifdef IN_GCC
-#include "d-gcc-complex_t.h"
-#endif
 
 class Module;
 
@@ -437,7 +425,6 @@ int runProgram();
 const char *inifile(const char *argv0, const char *inifile, const char* envsectionname);
 void halt();
 
-/*** Where to send error messages ***/
 class Dsymbol;
 class Library;
 class File;
@@ -447,5 +434,7 @@ void obj_append(Dsymbol *s);
 void obj_write_deferred(Library *library);
 
 const char *importHint(const char *s);
+/// Little helper function for writting out deps. 
+void escapePath(OutBuffer *buf, const char *fname);
 
 #endif /* DMD_MARS_H */
