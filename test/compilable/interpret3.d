@@ -3663,6 +3663,27 @@ static assert(!is(typeof(compiles!(bug7780(1)))));
 static assert(!is(typeof(compiles!(bug7780(2)))));
 
 /**************************************************
+    10275 cast struct literals to immutable
+**************************************************/
+
+struct Bug10275
+{
+    uint[] ivals;
+}
+
+Bug10275 bug10275() {
+    return Bug10275([1,2,3]);
+}
+
+int test10275()
+{
+    immutable(Bug10275) xxx = cast(immutable(Bug10275))bug10275();
+    return 1;
+}
+
+static assert(test10275());
+
+/**************************************************
     6851 passing pointer by argument
 **************************************************/
 
@@ -3753,7 +3774,7 @@ struct S6816 {
 enum s6816 = S6816().foo();
 
 /**************************************************
-    7277 ICE
+    7277 ICE nestedstruct.init.tupleof
 **************************************************/
 
 struct Foo7277
@@ -3773,6 +3794,24 @@ struct Foo7277
 }
 
 static assert(Foo7277().func() == 17);
+
+/**************************************************
+    10217 ICE. CTFE version of 9315
+**************************************************/
+
+bool bug10217()
+{
+    struct S
+    {
+        int i;
+        void bar() {}
+    }
+    auto yyy = S.init.tupleof[$-1];
+    assert(!yyy);
+    return 1;
+}
+
+static assert(bug10217());
 
 /**************************************************
     8276 ICE

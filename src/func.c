@@ -62,6 +62,7 @@ FuncDeclaration::FuncDeclaration(Loc loc, Loc endloc, Identifier *id, StorageCla
     parameters = NULL;
     labtab = NULL;
     overnext = NULL;
+    overnext0 = NULL;
     vtblIndex = -1;
     hasReturnExp = 0;
     naked = 0;
@@ -1801,7 +1802,10 @@ void FuncDeclaration::semantic3(Scope *sc)
 
 bool FuncDeclaration::functionSemantic()
 {
-    if (scope && !originalType)     // semantic not yet run
+    if (!scope)
+        return true;
+
+    if (!originalType)      // semantic not yet run
     {
         TemplateInstance *spec = isSpeculative();
         unsigned olderrs = global.errors;
@@ -1817,14 +1821,26 @@ bool FuncDeclaration::functionSemantic()
     }
 
     // if inferring return type, sematic3 needs to be run
-    TemplateInstance *ti;
-    AggregateDeclaration *ad;
-    if (scope &&
-        (inferRetType && type && !type->nextOf() ||
-         (ti = parent->isTemplateInstance()) != NULL && !ti->isTemplateMixin() && ti->name == ident ||
-         (ad = isThis()) != NULL && ad->parent && ad->parent->isTemplateInstance() && !isVirtualMethod()))
-    {
+    if (inferRetType && type && !type->nextOf())
         return functionSemantic3();
+
+    TemplateInstance *ti = parent->isTemplateInstance();
+    if (ti && !ti->isTemplateMixin() && ti->name == ident)
+        return functionSemantic3();
+
+    AggregateDeclaration *ad = isThis();
+    if (ad && ad->parent && ad->parent->isTemplateInstance() && !isVirtualMethod())
+    {
+        if (ad->sizeok != SIZEOKdone)
+        {
+            /* Currently dmd cannot resolve forward references per methods,
+             * then setting SIZOKfwd is too conservative and would break existing code.
+             * So, just stop method attributes inference until ad->semantic() done.
+             */
+            //ad->sizeok = SIZEOKfwd;
+        }
+        else
+            return functionSemantic3();
     }
 
     return true;
@@ -1929,14 +1945,28 @@ bool FuncDeclaration::equals(RootObject *o)
     Dsymbol *s = isDsymbol(o);
     if (s)
     {
-        FuncDeclaration *fd1 = this->toAliasFunc();
+        FuncDeclaration *fd1 = this;
         FuncDeclaration *fd2 = s->isFuncDeclaration();
-        if (fd2)
+        if (!fd2)
+            return false;
+
+        FuncAliasDeclaration *fa1 = fd1->isFuncAliasDeclaration();
+        FuncAliasDeclaration *fa2 = fd2->isFuncAliasDeclaration();
+        if (fa1 && fa2)
         {
-            fd2 = fd2->toAliasFunc();
-            return fd1->toParent()->equals(fd2->toParent()) &&
-                fd1->ident->equals(fd2->ident) && fd1->type->equals(fd2->type);
+            return fa1->toAliasFunc()->equals(fa2->toAliasFunc()) &&
+                   fa1->hasOverloads == fa2->hasOverloads;
         }
+
+        if (fa1 && (fd1 = fa1->toAliasFunc())->isUnique() && !fa1->hasOverloads)
+            fa1 = NULL;
+        if (fa2 && (fd2 = fa2->toAliasFunc())->isUnique() && !fa2->hasOverloads)
+            fa2 = NULL;
+        if ((fa1 != NULL) != (fa2 != NULL))
+            return false;
+
+        return fd1->toParent()->equals(fd2->toParent()) &&
+            fd1->ident->equals(fd2->ident) && fd1->type->equals(fd2->type);
     }
     return false;
 }

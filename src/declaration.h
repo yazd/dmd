@@ -129,7 +129,7 @@ public:
     PROT protection;
     LINK linkage;
     int inuse;                  // used to detect cycles
-    const char *mangleOverride;      // overridden symbol with pragma(mangle, "...") 
+    const char *mangleOverride;      // overridden symbol with pragma(mangle, "...")
     Semantic sem;
 
     Declaration(Identifier *id);
@@ -593,6 +593,7 @@ public:
     VarDeclarations *parameters;        // Array of VarDeclaration's for parameters
     DsymbolTable *labtab;               // statement label symbol table
     Declaration *overnext;              // next in overload list
+    FuncDeclaration *overnext0;         // next in overload list (only used during IFTI)
     Loc endloc;                         // location of closing curly bracket
     int vtblIndex;                      // for member functions, index into vtbl[]
     bool naked;                         // true if naked
@@ -677,6 +678,7 @@ public:
     void appendExp(Expression *e);
     void appendState(Statement *s);
     const char *mangle(bool isv = false);
+    const char *mangleExact(bool isv = false);
     const char *toPrettyChars();
     const char *toFullSignature();  // for diagnostics, e.g. 'int foo(int x, int y) pure'
     bool isMain();
@@ -753,7 +755,7 @@ public:
     FuncAliasDeclaration *isFuncAliasDeclaration() { return this; }
     const char *kind();
     Symbol *toSymbol();
-    const char *mangle(bool isv = false) { return toAliasFunc()->mangle(isv); }
+    const char *mangle(bool isv = false);
 
     FuncDeclaration *toAliasFunc();
 };
