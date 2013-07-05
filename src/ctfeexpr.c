@@ -366,7 +366,7 @@ Expression *copyLiteral(Expression *e)
  */
 Expression *paintTypeOntoLiteral(Type *type, Expression *lit)
 {
-    if (lit->type == type)
+    if (lit->type->equals(type))
         return lit;
     Expression *e;
     if (lit->op == TOKslice)
@@ -457,6 +457,13 @@ ArrayLiteralExp *createBlockDuplicatedArrayLiteral(Loc loc, Type *type,
 {
     Expressions *elements = new Expressions();
     elements->setDim(dim);
+    if (type->ty == Tsarray && type->nextOf()->ty == Tsarray &&
+        elem->type->ty != Tsarray)
+    {
+        // If it is a multidimensional array literal, do it recursively
+        elem = createBlockDuplicatedArrayLiteral(loc, type->nextOf(), elem,
+            ((TypeSArray *)type->nextOf())->dim->toInteger());
+    }
     bool mustCopy = needToCopyLiteral(elem);
     for (size_t i = 0; i < dim; i++)
     {   if (mustCopy)
@@ -1758,10 +1765,10 @@ void recursiveBlockAssign(ArrayLiteralExp *ae, Expression *val, bool wantRef)
     assert( ae->type->ty == Tsarray || ae->type->ty == Tarray);
 #if DMDV2
     Type *desttype = ((TypeArray *)ae->type)->next->castMod(0);
-    bool directblk = (val->type->toBasetype()->castMod(0)) == desttype;
+    bool directblk = (val->type->toBasetype()->castMod(0))->equals(desttype);
 #else
     Type *desttype = ((TypeArray *)ae->type)->next;
-    bool directblk = (val->type->toBasetype()) == desttype;
+    bool directblk = (val->type->toBasetype())->equals(desttype);
 #endif
 
     bool cow = !(val->op == TOKstructliteral || val->op == TOKarrayliteral

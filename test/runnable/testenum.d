@@ -103,6 +103,35 @@ void test6()
 }
 
 /**********************************************/
+// 3096
+
+void test3096()
+{
+    template Tuple(T...) { alias Tuple = T; }
+
+    template Base(E)
+    {
+        static if(is(E B == enum))
+            alias Base = B;
+    }
+
+    template GetEnum(T)
+    {
+        enum GetEnum { v = T.init }
+    }
+
+    struct S { }
+    class C { }
+
+    foreach (Type; Tuple!(char, wchar, dchar, byte, ubyte,
+                          short, ushort, int, uint, long,
+                          ulong, float, double, real, S, C))
+    {
+        static assert(is(Base!(GetEnum!Type) == Type));
+    }
+}
+
+/**********************************************/
 // 7719
 
 enum foo7719 = bar7719;
@@ -148,6 +177,38 @@ void test10113()
 
     assert(check);
 }
+
+/**********************************************/
+// 10503
+
+@property int octal10503(string num)()
+{
+    return num.length;
+}
+
+enum
+{
+    A10503 = octal10503!"2000000",
+    B10503 = octal10503!"4000",
+}
+
+/**********************************************/
+// 10505
+
+enum
+{
+    a10505 = true,
+    b10505 = 10.0f,
+    c10505 = false,
+    d10505 = 10,
+    e10505 = null
+}
+
+static assert(is(typeof(a10505) == bool));
+static assert(is(typeof(b10505) == float));
+static assert(is(typeof(c10505) == bool));
+static assert(is(typeof(d10505) == int));
+static assert(is(typeof(e10505) == typeof(null)));
 
 /**********************************************/
 

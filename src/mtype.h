@@ -43,8 +43,7 @@ class Parameter;
 
 // Back end
 #ifdef IN_GCC
-typedef union tree_node TYPE;
-typedef TYPE type;
+typedef union tree_node type;
 #else
 typedef struct TYPE type;
 #endif
@@ -228,6 +227,7 @@ public:
 
     Type(TY ty);
     virtual const char *kind();
+    Type *copy();
     virtual Type *syntaxCopy();
     bool equals(RootObject *o);
     int dyncast() { return DYNCAST_TYPE; } // kludge for template.isType()
@@ -452,6 +452,7 @@ public:
     int checkBoolean();
     MATCH implicitConvTo(Type *to);
     Expression *defaultInit(Loc loc);
+    Expression *defaultInitLiteral(Loc loc);
     TypeBasic *elementType();
     int isZeroInit(Loc loc);
     TypeInfoDeclaration *getTypeInfoDeclaration();
@@ -669,7 +670,6 @@ public:
 
     TypeFunction(Parameters *parameters, Type *treturn, int varargs, LINK linkage, StorageClass stc = 0);
     const char *kind();
-    TypeFunction *copy();
     Type *syntaxCopy();
     Type *semantic(Loc loc, Scope *sc);
     void purityLevel();

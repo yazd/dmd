@@ -591,12 +591,18 @@ Expression *searchUFCS(Scope *sc, UnaExp *ue, Identifier *ident)
 
     if (ue->op == TOKdotti)
     {
-        DotTemplateInstanceExp *dti = (DotTemplateInstanceExp *)ue;
-        TemplateDeclaration *td = s->toAlias()->isTemplateDeclaration();
+        Dsymbol *sx = s->toAlias();
+        TemplateDeclaration *td = sx->isTemplateDeclaration();
+        if (!td)
+        {   if (FuncDeclaration *fd = sx->isFuncDeclaration())
+                td = fd->findTemplateDeclRoot();
+        }
         if (!td)
         {   s->error(loc, "is not a template");
             return new ErrorExp();
         }
+
+        DotTemplateInstanceExp *dti = (DotTemplateInstanceExp *)ue;
         if (!dti->ti->semanticTiargs(sc))
             return new ErrorExp();
         return new ScopeExp(loc, new TemplateInstance(loc, td, dti->ti->tiargs));
@@ -1316,7 +1322,7 @@ Type *functionParameters(Loc loc, Scope *sc, TypeFunction *tf,
 
             if (!arg)
             {
-                if (!p->defaultArg || !fd)
+                if (!p->defaultArg)
                 {
                     if (tf->varargs == 2 && i + 1 == nparams)
                         goto L2;
@@ -1368,9 +1374,8 @@ Type *functionParameters(Loc loc, Scope *sc, TypeFunction *tf,
                         Identifier *id = Lexer::uniqueId("__arrayArg");
                         Type *t = new TypeSArray(((TypeArray *)tb)->next, new IntegerExp(nargs - i));
                         t = t->semantic(loc, sc);
-                        bool isSafe = fd ? fd->isSafe() : tf->trust == TRUSTsafe;
                         VarDeclaration *v = new VarDeclaration(loc, t, id,
-                            (isSafe && sc->func) ? NULL : new VoidInitializer(loc));
+                            (sc->func && sc->func->isSafe()) ? NULL : new VoidInitializer(loc));
                         v->storage_class |= STCctfe;
                         v->semantic(sc);
                         v->parent = sc->parent;
@@ -1478,7 +1483,7 @@ Type *functionParameters(Loc loc, Scope *sc, TypeFunction *tf,
                     arg = arg->implicitCastTo(sc, p->type->substWildTo(wildmatch));
                     arg = arg->optimize(WANTvalue, p->storageClass & STCref);
                 }
-                else if (p->type != arg->type)
+                else if (!p->type->equals(arg->type))
                 {
                     //printf("arg->type = %s, p->type = %s\n", arg->type->toChars(), p->type->toChars());
                     if (arg->op == TOKtype)
@@ -1737,12 +1742,12 @@ void argsToCBuffer(OutBuffer *buf, Expressions *expressions, HdrGenState *hgs)
 
 void argExpTypesToCBuffer(OutBuffer *buf, Expressions *arguments, HdrGenState *hgs)
 {
-    if (arguments)
-    {   OutBuffer argbuf;
-
+    if (arguments && arguments->dim)
+    {
+        OutBuffer argbuf;
         for (size_t i = 0; i < arguments->dim; i++)
-        {   Expression *e = (*arguments)[i];
-
+        {
+            Expression *e = (*arguments)[i];
             if (i)
                 buf->writestring(", ");
             argbuf.reset();
@@ -1975,11 +1980,7 @@ real_t Expression::toImaginary()
 complex_t Expression::toComplex()
 {
     error("Floating point constant expression expected instead of %s", toChars());
-#ifdef IN_GCC
-    return complex_t(real_t(0)); // %% nicer
-#else
     return 0.0;
-#endif
 }
 
 StringExp *Expression::toString()
@@ -2869,20 +2870,12 @@ char *RealExp::toChars()
 
 dinteger_t RealExp::toInteger()
 {
-#ifdef IN_GCC
-    return (sinteger_t) toReal().toInt();
-#else
     return (sinteger_t) toReal();
-#endif
 }
 
 uinteger_t RealExp::toUInteger()
 {
-#ifdef IN_GCC
-    return (uinteger_t) toReal().toInt();
-#else
     return (uinteger_t) toReal();
-#endif
 }
 
 real_t RealExp::toReal()
@@ -2946,12 +2939,8 @@ Expression *RealExp::semantic(Scope *sc)
 
 int RealExp::isBool(int result)
 {
-#ifdef IN_GCC
-    return result ? (! value.isZero()) : (value.isZero());
-#else
     return result ? (value != 0)
                   : (value == 0);
-#endif
 }
 
 void floatToBuffer(OutBuffer *buf, Type *type, real_t value)
@@ -3018,6 +3007,8 @@ void realToMangleBuffer(OutBuffer *buf, real_t value)
 
     if (Port::isNan(value))
         buf->writestring("NAN");        // no -NAN bugs
+    else if (Port::isInfinity(value))
+        buf->writestring(value < 0 ? "NINF" : "INF");
     else
     {
         char buffer[36];
@@ -3081,20 +3072,12 @@ char *ComplexExp::toChars()
 
 dinteger_t ComplexExp::toInteger()
 {
-#ifdef IN_GCC
-    return (sinteger_t) toReal().toInt();
-#else
     return (sinteger_t) toReal();
-#endif
 }
 
 uinteger_t ComplexExp::toUInteger()
 {
-#ifdef IN_GCC
-    return (uinteger_t) toReal().toInt();
-#else
     return (uinteger_t) toReal();
-#endif
 }
 
 real_t ComplexExp::toReal()
@@ -3151,19 +3134,11 @@ void ComplexExp::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
     /* Print as:
      *  (re+imi)
      */
-#ifdef IN_GCC
-    char buf1[sizeof(value) * 3 + 8 + 1];
-    char buf2[sizeof(value) * 3 + 8 + 1];
-    creall(value).format(buf1, sizeof(buf1));
-    cimagl(value).format(buf2, sizeof(buf2));
-    buf->printf("(%s+%si)", buf1, buf2);
-#else
     buf->writeByte('(');
     floatToBuffer(buf, type, creall(value));
     buf->writeByte('+');
     floatToBuffer(buf, type, cimagl(value));
     buf->writestring("i)");
-#endif
 }
 
 void ComplexExp::toMangleBuffer(OutBuffer *buf)
@@ -5132,6 +5107,10 @@ Lagain:
         if (f)
         {
             checkDeprecated(sc, f);
+#if DMDV2
+            checkPurity(sc, f);
+            checkSafety(sc, f);
+#endif
             member = f->isCtorDeclaration();
             assert(member);
 
@@ -5227,6 +5206,10 @@ Lagain:
         if (f)
         {
             checkDeprecated(sc, f);
+#if DMDV2
+            checkPurity(sc, f);
+            checkSafety(sc, f);
+#endif
             member = f->isCtorDeclaration();
             assert(member);
 
@@ -7893,6 +7876,34 @@ Expression *DotTemplateInstanceExp::semanticY(Scope *sc, int flag)
 L1:
     if (e->op == TOKerror)
         return e;
+    if (e->op == TOKdotvar)
+    {
+        DotVarExp *dve = (DotVarExp *)e;
+        FuncDeclaration *f = dve->var->isFuncDeclaration();
+        if (f)
+        {
+            TemplateDeclaration *td = f->findTemplateDeclRoot();
+            if (td)
+            {
+                e = new DotTemplateExp(dve->loc, dve->e1, td);
+                e = e->semantic(sc);
+            }
+        }
+    }
+    else if (e->op == TOKvar)
+    {
+        VarExp *ve = (VarExp *)e;
+        FuncDeclaration *f = ve->var->isFuncDeclaration();
+        if (f)
+        {
+            TemplateDeclaration *td = f->findTemplateDeclRoot();
+            if (td)
+            {
+                e = new ScopeExp(ve->loc, td);
+                e = e->semantic(sc);
+            }
+        }
+    }
     if (e->op == TOKdottd)
     {
         if (ti->errors)
@@ -12737,16 +12748,20 @@ Expression *EqualExp::semantic(Scope *sc)
 
     BinExp::semanticp(sc);
 
+    if (e1->op == TOKtype || e2->op == TOKtype)
+        return incompatibleTypes();
+
     /* Before checking for operator overloading, check to see if we're
      * comparing the addresses of two statics. If so, we can just see
      * if they are the same symbol.
      */
     if (e1->op == TOKaddress && e2->op == TOKaddress)
-    {   AddrExp *ae1 = (AddrExp *)e1;
+    {
+        AddrExp *ae1 = (AddrExp *)e1;
         AddrExp *ae2 = (AddrExp *)e2;
-
         if (ae1->e1->op == TOKvar && ae2->e1->op == TOKvar)
-        {   VarExp *ve1 = (VarExp *)ae1->e1;
+        {
+            VarExp *ve1 = (VarExp *)ae1->e1;
             VarExp *ve2 = (VarExp *)ae2->e1;
 
             if (ve1->var == ve2->var /*|| ve1->var->toSymbol() == ve2->var->toSymbol()*/)
@@ -13019,6 +13034,7 @@ Expression *CondExp::semantic(Scope *sc)
             e2 = e2->castTo(sc, type);
         }
     }
+    type = type->merge2();
 #if 0
     printf("res: %s\n", type->toChars());
     printf("e1 : %s\n", e1->type->toChars());
