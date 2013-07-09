@@ -2627,6 +2627,58 @@ static: // necessary to make overloaded symbols accessible via __traits(getOverl
 }
 
 /******************************************/
+// 10498
+
+template triggerIssue10498a()
+{
+    enum triggerIssue10498a = __traits(compiles, { T10498a; });
+}
+
+template PackedGenericTuple10498a(Args...)
+{
+    alias Args Tuple;
+    enum e = triggerIssue10498a!();
+}
+
+struct S10498a { }
+
+template T10498a()
+{
+    alias PackedGenericTuple10498a!S10498a T10498a;
+}
+
+void test10498a()
+{
+    alias T10498a!() t;
+    static assert(is(t.Tuple[0])); // Fails -> OK
+}
+
+// --------
+
+template triggerIssue10498b(A...)
+{
+    enum triggerIssue10498b = __traits(compiles, { auto a = A[0]; });
+}
+
+template PackedGenericTuple10498b(Args...)
+{
+    alias Args Tuple;
+    enum e = triggerIssue10498b!Args;
+}
+
+template T10498b()
+{
+    struct S {} // The fact `S` is in `T` causes the problem
+    alias PackedGenericTuple10498b!S T10498b;
+}
+
+void test10498b()
+{
+    alias T10498b!() t;
+    static assert(is(t.Tuple[0]));
+}
+
+/******************************************/
 // 10537
 
 struct Iota10537
@@ -2649,6 +2701,25 @@ dstring rewriteCode10537(dstring code)
 {
     skipStrings10537(code);  // IFTI causes forward reference
     return "";
+}
+
+/******************************************/
+// 10558
+
+template Template10558() {}
+
+struct Struct10558(alias T){}
+
+alias bar10558 = foo10558!(Template10558!());
+
+template foo10558(alias T)
+{
+    alias foobar = Struct10558!T;
+
+    void fun()
+    {
+        alias a = foo10558!T;
+    }
 }
 
 /******************************************/

@@ -3529,6 +3529,21 @@ int bug10211()
 static assert(bug10211());
 
 /**************************************************
+    10568 CTFE rejects function pointer safety casts
+**************************************************/
+
+@safe void safetyDance() {}
+
+int isItSafeToDance()
+{
+    void function() @trusted yourfriends = &safetyDance;
+    void function() @safe nofriendsOfMine = yourfriends;
+    return 1;
+}
+
+static assert(isItSafeToDance());
+
+/**************************************************
     9170 Allow reinterpret casts float<->int
 **************************************************/
 int f9170(float x) {
@@ -4475,6 +4490,15 @@ static assert({
 }());
 
 /**************************************************
+    10499 static template struct declaration
+**************************************************/
+
+static assert({
+    static struct Result() {}
+    return true;
+}());
+
+/**************************************************
     6522 opAssign + foreach ref
 **************************************************/
 
@@ -5303,6 +5327,18 @@ bool bug7987()
 
 static assert(bug7987());
 
+/**************************************************
+    10579 typeinfo.func() must not segfault
+**************************************************/
+
+static assert(!is(typeof(compiles!(typeid(int).toString.length))));
+
+class Bug10579 {
+    int foo() { return 1; }
+}
+Bug10579 uninitialized10579;
+
+static assert(!is(typeof(compiles!(uninitialized10579.foo()))));
 
 /******************************************************/
 
@@ -5362,8 +5398,6 @@ label:
     return true;
 }
 static assert(bug8865());
-
-
 
 /******************************************************/
 

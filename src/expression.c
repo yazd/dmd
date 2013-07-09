@@ -265,6 +265,7 @@ Expression *checkRightThis(Scope *sc, Expression *e)
 
 Expression *resolvePropertiesX(Scope *sc, Expression *e1, Expression *e2 = NULL)
 {
+    //printf("resolvePropertiesX, e1 = %s %s, e2 = %s\n", Token::toChars(e1->op), e1->toChars(), e2 ? e2->toChars() : NULL);
     Loc loc = e1->loc;
 
     OverloadSet *os;
@@ -484,7 +485,7 @@ return_expr:
     if (!e1->type)
     {
         error(loc, "cannot resolve type for %s", e1->toChars());
-        e1->type = new TypeError();
+        e1 = new ErrorExp();
     }
     return e1;
 
@@ -614,6 +615,17 @@ Expression *searchUFCS(Scope *sc, UnaExp *ue, Identifier *ident)
 }
 
 /******************************
+ * check e is exp.opDispatch!(tiargs) or not
+ * It's used to switch to UFCS the semantic analysis path
+ */
+
+bool isDotOpDispatch(Expression *e)
+{
+    return e->op == TOKdotti &&
+           ((DotTemplateInstanceExp *)e)->ti->name == Id::opDispatch;
+}
+
+/******************************
  * Pull out callable entity with UFCS.
  */
 
@@ -630,7 +642,8 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
 
         Expression *ex = die->semanticX(sc);
         if (ex != die)
-        {   ce->e1 = ex;
+        {
+            ce->e1 = ex;
             return NULL;
         }
         eleft = die->e1;
@@ -651,11 +664,13 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
                  *  aa.remove(arg) into delete aa[arg]
                  */
                 if (!ce->arguments || ce->arguments->dim != 1)
-                {   ce->error("expected key as argument to aa.remove()");
+                {
+                    ce->error("expected key as argument to aa.remove()");
                     return new ErrorExp();
                 }
                 if (!eleft->type->isMutable())
-                {   ce->error("cannot remove key from %s associative array %s",
+                {
+                    ce->error("cannot remove key from %s associative array %s",
                             MODtoChars(t->mod), eleft->toChars());
                     return new ErrorExp();
                 }
@@ -676,7 +691,8 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
                 return NULL;
             }
             else
-            {   TypeAArray *taa = (TypeAArray *)t;
+            {
+                TypeAArray *taa = (TypeAArray *)t;
                 assert(taa->ty == Taarray);
                 StructDeclaration *sd = taa->getImpl();
                 Dsymbol *s = sd->search(Loc(), ident, 2);
@@ -687,8 +703,19 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
         else
         {
             if (Expression *ey = die->semanticY(sc, 1))
-            {   ce->e1 = ey;
-                return NULL;
+            {
+                ce->e1 = ey;
+                if (isDotOpDispatch(ey))
+                {
+                    unsigned errors = global.startGagging();
+                    e = ce->semantic(sc);
+                    if (global.endGagging(errors))
+                    {}  /* fall down to UFCS */
+                    else
+                        return e;
+                }
+                else
+                    return NULL;
             }
         }
         e = searchUFCS(sc, die, ident);
@@ -697,7 +724,8 @@ Expression *resolveUFCS(Scope *sc, CallExp *ce)
     {
         DotTemplateInstanceExp *dti = (DotTemplateInstanceExp *)ce->e1;
         if (Expression *ey = dti->semanticY(sc, 1))
-        {   ce->e1 = ey;
+        {
+            ce->e1 = ey;
             return NULL;
         }
         eleft = dti->e1;
@@ -1847,29 +1875,6 @@ Expression *Expression::trySemantic(Scope *sc)
     return e;
 }
 
-/**********************************
- * Shortcut to run semantic with purity and
- * safety checking disabled for the immediate
- * expressions
- */
-
-Expression *Expression::ctfeSemantic(Scope *sc)
-{
-    if (sc)
-    {
-        assert(sc->needctfe >= 0);
-        sc->needctfe++;
-        Expression *e = semantic(sc);
-        sc->needctfe--;
-        assert(sc->needctfe >= 0);
-        return e;
-    }
-    else
-    {
-        return semantic(sc);
-    }
-}
-
 void Expression::print()
 {
     fprintf(stderr, "%s\n", toChars());
@@ -2173,7 +2178,7 @@ void Expression::checkPurity(Scope *sc, FuncDeclaration *f)
             f->parent->isTemplateInstance()->enclosing == NULL)
         {   // The closest pure parent of instantiated non-nested template function is
             // always itself.
-            if (!f->isPure() && outerfunc->setImpure())
+            if (!f->isPure() && outerfunc->setImpure() && !(sc->flags & SCOPEctfe))
                 error("pure function '%s' cannot call impure function '%s'",
                     outerfunc->toPrettyChars(), f->toPrettyChars());
             return;
@@ -2213,7 +2218,7 @@ void Expression::checkPurity(Scope *sc, FuncDeclaration *f)
         // OR, they must have the same pure parent.
         if (/*outerfunc->isPure() &&*/    // comment out because we deduce purity now
             !f->isPure() && calledparent != outerfunc &&
-            !sc->needctfe)
+            !(sc->flags & SCOPEctfe))
         {
             if (outerfunc->setImpure())
                 error("pure function '%s' cannot call impure function '%s'",
@@ -2315,7 +2320,7 @@ void Expression::checkPurity(Scope *sc, VarDeclaration *v, Expression *ethis)
 void Expression::checkSafety(Scope *sc, FuncDeclaration *f)
 {
     if (sc->func && !sc->intypeof &&
-        !(sc->needctfe) &&
+        !(sc->flags & SCOPEctfe) &&
         !f->isSafe() && !f->isTrusted())
     {
         if (sc->func->setUnsafe())
@@ -3428,11 +3433,6 @@ Lagain:
         if (!f->functionSemantic())
             return new ErrorExp();
 
-        if (f->isUnitTestDeclaration())
-        {
-            error("cannot call unittest function %s", toChars());
-            return new ErrorExp();
-        }
         if (!f->type->deco)
         {
             error("forward reference to %s", toChars());
@@ -5361,10 +5361,11 @@ Expression *NewAnonClassExp::semantic(Scope *sc)
 #endif
 
     Expression *d = new DeclarationExp(loc, cd);
-    int needctfe = sc->needctfe;
-    sc->needctfe = 0;
+    sc = sc->startCTFE();       // just create new scope
+    sc->flags &= ~SCOPEctfe;    // temporary stop CTFE
     d = d->semantic(sc);
-    sc->needctfe = needctfe;
+    sc->flags |=  SCOPEctfe;
+    sc = sc->endCTFE();
 
     Expression *n = new NewExp(loc, thisexp, newargs, cd->type, arguments);
 
@@ -5822,8 +5823,8 @@ Expression *FuncExp::semantic(Scope *sc)
 #endif
     Expression *e = this;
 
-    int needctfe = sc->needctfe;
-    sc->needctfe = 0;
+    sc = sc->startCTFE();       // just create new scope
+    sc->flags &= ~SCOPEctfe;    // temporary stop CTFE
 
     if (!type || type == Type::tvoid)
     {
@@ -5912,7 +5913,8 @@ Expression *FuncExp::semantic(Scope *sc)
         fd->tookAddressOf++;
     }
 Ldone:
-    sc->needctfe = needctfe;
+    sc->flags |=  SCOPEctfe;
+    sc = sc->endCTFE();
     return e;
 }
 
@@ -6995,8 +6997,10 @@ Expression *CompileExp::semantic(Scope *sc)
 #if LOGSEMANTIC
     printf("CompileExp::semantic('%s')\n", toChars());
 #endif
-    e1 = e1->ctfeSemantic(sc);
+    sc = sc->startCTFE();
+    e1 = e1->semantic(sc);
     e1 = resolveProperties(sc, e1);
+    sc = sc->endCTFE();
     if (e1->op == TOKerror)
         return e1;
     if (!e1->type->isString())
@@ -7048,8 +7052,10 @@ Expression *FileExp::semantic(Scope *sc)
 #if LOGSEMANTIC
     printf("FileExp::semantic('%s')\n", toChars());
 #endif
-    e1 = e1->ctfeSemantic(sc);
+    sc = sc->startCTFE();
+    e1 = e1->semantic(sc);
     e1 = resolveProperties(sc, e1);
+    sc = sc->endCTFE();
     e1 = e1->ctfeInterpret();
     if (e1->op != TOKstring)
     {   error("file name argument must be a string, not (%s)", e1->toChars());
@@ -7192,6 +7198,15 @@ Expression *DotIdExp::semantic(Scope *sc)
     //printf("e1->op = %d, '%s'\n", e1->op, Token::toChars(e1->op));
 #endif
     Expression *e = semanticY(sc, 1);
+    if (e && isDotOpDispatch(e))
+    {
+        unsigned errors = global.startGagging();
+        e = resolvePropertiesX(sc, e);
+        if (global.endGagging(errors))
+            e = NULL;   /* fall down to UFCS */
+        else
+            return e;
+    }
     if (!e)     // if failed to find the property
     {
         /* If ident is not a valid property, rewrite:
@@ -7868,6 +7883,13 @@ Expression *DotTemplateInstanceExp::semanticY(Scope *sc, int flag)
                 return NULL;
         }
         e = die->semanticY(sc, flag);
+        if (flag && e && isDotOpDispatch(e))
+        {
+            /* opDispatch!tiargs would be a function template that needs IFTI,
+             * so it's not a template
+             */
+            e = NULL;   /* fall down to UFCS */
+        }
         if (flag && !e)
             return NULL;
     }
@@ -8787,7 +8809,7 @@ Lagain:
 #endif
             f->checkNestedReference(sc, loc);
         }
-        else if (sc->func && !sc->needctfe)
+        else if (sc->func && !(sc->flags & SCOPEctfe))
         {
             if (!tf->purity && !(sc->flags & SCOPEdebug) && sc->func->setImpure())
             {
@@ -9955,22 +9977,20 @@ Lagain:
 
     if (lwr)
     {
-        if (t->ty == Ttuple)
-            lwr = lwr->ctfeSemantic(sc2);
-        else
-            lwr = lwr->semantic(sc2);
+        if (t->ty == Ttuple) sc2 = sc2->startCTFE();
+        lwr = lwr->semantic(sc2);
         lwr = resolveProperties(sc2, lwr);
+        if (t->ty == Ttuple) sc2 = sc2->endCTFE();
         lwr = lwr->implicitCastTo(sc2, Type::tsize_t);
         if (lwr->type == Type::terror)
             goto Lerr;
     }
     if (upr)
     {
-        if (t->ty == Ttuple)
-            upr = upr->ctfeSemantic(sc2);
-        else
-            upr = upr->semantic(sc2);
+        if (t->ty == Ttuple) sc2 = sc2->startCTFE();
+        upr = upr->semantic(sc2);
         upr = resolveProperties(sc2, upr);
+        if (t->ty == Ttuple) sc2 = sc2->endCTFE();
         upr = upr->implicitCastTo(sc2, Type::tsize_t);
         if (upr->type == Type::terror)
             goto Lerr;
@@ -10393,6 +10413,7 @@ IndexExp::IndexExp(Loc loc, Expression *e1, Expression *e2)
     //printf("IndexExp::IndexExp('%s')\n", toChars());
     lengthVar = NULL;
     modifiable = 0;     // assume it is an rvalue
+    skipboundscheck = 0;
 }
 
 Expression *IndexExp::syntaxCopy()
@@ -10443,11 +10464,10 @@ Expression *IndexExp::semantic(Scope *sc)
         sc = sc->push(sym);
     }
 
-    if (t1->ty == Ttuple)
-        e2 = e2->ctfeSemantic(sc);
-    else
-        e2 = e2->semantic(sc);
+    if (t1->ty == Ttuple) sc = sc->startCTFE();
+    e2 = e2->semantic(sc);
     e2 = resolveProperties(sc, e2);
+    if (t1->ty == Ttuple) sc = sc->endCTFE();
     if (e2->type == Type::terror)
         goto Lerr;
     if (e2->type->ty == Ttuple && ((TupleExp *)e2)->exps->dim == 1) // bug 4444 fix
@@ -10555,6 +10575,21 @@ Expression *IndexExp::semantic(Scope *sc)
         case Terror:
             goto Lerr;
     }
+
+    if (t1->ty == Tsarray || t1->ty == Tarray)
+    {
+        Expression *el = new ArrayLengthExp(loc, e1);
+        el = el->semantic(sc);
+        el = el->optimize(WANTvalue);
+        if (el->op == TOKint64)
+        {
+            e2 = e2->optimize(WANTvalue);
+            dinteger_t length = el->toInteger();
+            if (length)
+                skipboundscheck = IntRange(0, length).contains(e2->getIntRange());
+        }
+    }
+
     return e;
 
 Lerr:
@@ -10901,11 +10936,21 @@ Expression *AssignExp::semantic(Scope *sc)
     {
         DotIdExp *die = (DotIdExp *)e1;
         Expression *e = die->semanticY(sc, 1);
+        if (e && isDotOpDispatch(e))
+        {
+            unsigned errors = global.startGagging();
+            e = resolvePropertiesX(sc, e, e2);
+            if (global.endGagging(errors))
+                e = NULL;   /* fall down to UFCS */
+            else
+                return e;
+        }
         if (!e)
             return resolveUFCSProperties(sc, e1, e2);
         e1 = e;
     }
-    e1 = e1->semantic(sc);
+    else
+        e1 = e1->semantic(sc);
     if (e1->op == TOKerror)
         return new ErrorExp();
 
@@ -11614,6 +11659,19 @@ Expression *AddExp::semantic(Scope *sc)
         Type *tb1 = e1->type->toBasetype();
         Type *tb2 = e2->type->toBasetype();
 
+        if (tb1->ty == Tdelegate ||
+            tb1->ty == Tpointer && tb1->nextOf()->ty == Tfunction)
+        {
+            e = e1->checkArithmetic();
+        }
+        if (tb2->ty == Tdelegate ||
+            tb2->ty == Tpointer && tb2->nextOf()->ty == Tfunction)
+        {
+            e = e2->checkArithmetic();
+        }
+        if (e)
+            return e;
+
         if ((tb1->ty == Tarray || tb1->ty == Tsarray) &&
             (tb2->ty == Tarray || tb2->ty == Tsarray) &&
             tb1->nextOf()->equals(tb2->nextOf())
@@ -11623,8 +11681,10 @@ Expression *AddExp::semantic(Scope *sc)
             e = this;
         }
         else if (tb1->ty == Tpointer && e2->type->isintegral() ||
-            tb2->ty == Tpointer && e1->type->isintegral())
+                 tb2->ty == Tpointer && e1->type->isintegral())
+        {
             e = scaleFactor(sc);
+        }
         else if (tb1->ty == Tpointer && tb2->ty == Tpointer)
         {
             return incompatibleTypes();
@@ -11690,9 +11750,23 @@ Expression *MinExp::semantic(Scope *sc)
     if (e)
         return e;
 
-    e = this;
     Type *t1 = e1->type->toBasetype();
     Type *t2 = e2->type->toBasetype();
+
+    if (t1->ty == Tdelegate ||
+        t1->ty == Tpointer && t1->nextOf()->ty == Tfunction)
+    {
+        e = e1->checkArithmetic();
+    }
+    if (t2->ty == Tdelegate ||
+        t2->ty == Tpointer && t2->nextOf()->ty == Tfunction)
+    {
+        e = e2->checkArithmetic();
+    }
+    if (e)
+        return e;
+
+    e = this;
     if (t1->ty == Tpointer)
     {
         if (t2->ty == Tpointer)

@@ -1895,7 +1895,7 @@ MATCH Type::implicitConvTo(Type *to)
     //printf("Type::implicitConvTo(this=%p, to=%p)\n", this, to);
     //printf("from: %s\n", toChars());
     //printf("to  : %s\n", to->toChars());
-    if (this == to)
+    if (this->equals(to))
         return MATCHexact;
     return MATCHnomatch;
 }
@@ -2216,6 +2216,11 @@ Expression *Type::noMember(Scope *sc, Expression *e, Identifier *ident, int flag
             DotTemplateInstanceExp *dti = new DotTemplateInstanceExp(e->loc, e, Id::opDispatch, tiargs);
             dti->ti->tempdecl = td;
 
+            /* opDispatch, which doesn't need IFTI,  may occur instantiate error.
+             * It should be gagged if flag != 0.
+             * e.g.
+             *  tempalte opDispatch(name) if (isValid!name) { ... }
+             */
             unsigned errors = flag ? global.startGagging() : 0;
             Expression *e = dti->semanticY(sc, 0);
             if (flag && global.endGagging(errors))
@@ -3745,16 +3750,24 @@ unsigned TypeSArray::alignsize()
 Expression *semanticLength(Scope *sc, Type *t, Expression *exp)
 {
     if (t->ty == Ttuple)
-    {   ScopeDsymbol *sym = new ArrayScopeSymbol(sc, (TypeTuple *)t);
+    {
+        ScopeDsymbol *sym = new ArrayScopeSymbol(sc, (TypeTuple *)t);
         sym->parent = sc->scopesym;
         sc = sc->push(sym);
 
-        exp = exp->ctfeSemantic(sc);
+        sc = sc->startCTFE();
+        exp = exp->semantic(sc);
+        sc = sc->endCTFE();
 
         sc->pop();
     }
     else
-        exp = exp->ctfeSemantic(sc);
+    {
+        sc = sc->startCTFE();
+        exp = exp->semantic(sc);
+        sc = sc->endCTFE();
+    }
+
     return exp;
 }
 
@@ -3764,7 +3777,9 @@ Expression *semanticLength(Scope *sc, TupleDeclaration *s, Expression *exp)
     sym->parent = sc->scopesym;
     sc = sc->push(sym);
 
-    exp = exp->ctfeSemantic(sc);
+    sc = sc->startCTFE();
+    exp = exp->semantic(sc);
+    sc = sc->endCTFE();
 
     sc->pop();
     return exp;
@@ -3792,12 +3807,13 @@ void TypeSArray::resolve(Loc loc, Scope *sc, Expression **pe, Type **pt, Dsymbol
             ScopeDsymbol *sym = new ArrayScopeSymbol(sc, td);
             sym->parent = sc->scopesym;
             sc = sc->push(sym);
+            sc = sc->startCTFE();
+            dim = dim->semantic(sc);
+            sc = sc->endCTFE();
+            sc = sc->pop();
 
-            dim = dim->ctfeSemantic(sc);
             dim = dim->ctfeInterpret();
             uinteger_t d = dim->toUInteger();
-
-            sc = sc->pop();
 
             if (d >= td->objects->dim)
             {   error(loc, "tuple index %llu exceeds length %u", d, td->objects->dim);
@@ -3881,7 +3897,7 @@ Type *TypeSArray::semantic(Loc loc, Scope *sc)
         return t;
     }
 
-    Type *tn = next->semantic(loc,sc);
+    Type *tn = next->semantic(loc, sc);
     if (tn->ty == Terror)
         return terror;
 
@@ -3977,6 +3993,19 @@ Type *TypeSArray::semantic(Loc loc, Scope *sc)
 
 Lerror:
     return Type::terror;
+}
+
+// Make corresponding static array type without semantic
+Type *TypeSArray::makeType(Loc loc, Type *tn, dinteger_t dim)
+{
+    assert(tn->deco);
+    Type *t = new TypeSArray(tn, new IntegerExp(loc, dim, Type::tindex));
+
+    // according to TypeSArray::semantic()
+    t = t->addMod(tn->mod);
+    t = t->merge();
+
+    return t;
 }
 
 void TypeSArray::toDecoBuffer(OutBuffer *buf, int flag)
@@ -4476,10 +4505,8 @@ Type *TypeAArray::semantic(Loc loc, Scope *sc)
         if (e)
         {   // It was an expression -
             // Rewrite as a static array
-            TypeSArray *tsa;
-
-            tsa = new TypeSArray(next, e);
-            return tsa->semantic(loc,sc);
+            TypeSArray *tsa = new TypeSArray(next, e);
+            return tsa->semantic(loc, sc);
         }
         else if (t)
             index = t;
@@ -5940,20 +5967,23 @@ MATCH TypeFunction::callMatch(Type *tthis, Expressions *args, int flag)
             if (m && !arg->isLvalue())
             {
                 if (arg->op == TOKstring && tprmb->ty == Tsarray)
-                {   if (targb->ty != Tsarray)
-                        {
-                        targb = new TypeSArray(tprmb->nextOf()->castMod(targb->nextOf()->mod),
-                                new IntegerExp(Loc(), ((StringExp *)arg)->len,
-                                Type::tindex));
-                        targb = targb->semantic(Loc(), NULL);
+                {
+                    if (targb->ty != Tsarray)
+                    {
+                        Type *tn = tprmb->nextOf()->castMod(targb->nextOf()->mod);
+                        dinteger_t dim = ((StringExp *)arg)->len;
+                        targb = TypeSArray::makeType(Loc(), tn, dim);
                     }
                 }
                 else if (arg->op == TOKslice && tprmb->ty == Tsarray)
-                {   // Allow conversion from T[lwr .. upr] to ref T[upr-lwr]
-                    targb = new TypeSArray(targb->nextOf(),
-                            new IntegerExp(Loc(), ((TypeSArray *)tprmb)->dim->toUInteger(),
-                            Type::tindex));
-                    targb = targb->semantic(Loc(), NULL);
+                {
+                    // Allow conversion from T[lwr .. upr] to ref T[upr-lwr]
+                    if (targb->ty != Tsarray)
+                    {
+                        Type *tn = targb->nextOf();
+                        dinteger_t dim = ((TypeSArray *)tprmb)->dim->toUInteger();
+                        targb = TypeSArray::makeType(Loc(), tn, dim);
+                    }
                 }
                 else
                     goto Nomatch;
@@ -7742,7 +7772,13 @@ Expression *TypeTypedef::defaultInitLiteral(Loc loc)
     if (sym->init)
     {
         //sym->init->toExpression()->print();
-        return sym->init->toExpression();
+        Expression *e = sym->init->toExpression();
+        if (!e)
+        {
+            error(loc, "void initializer has no value");
+            e = new ErrorExp();
+        }
+        return e;
     }
     Type *bt = sym->basetype;
     Expression *e = bt->defaultInitLiteral(loc);
@@ -9166,16 +9202,16 @@ void TypeSlice::resolve(Loc loc, Scope *sc, Expression **pe, Type **pt, Dsymbol 
             ScopeDsymbol *sym = new ArrayScopeSymbol(sc, td);
             sym->parent = sc->scopesym;
             sc = sc->push(sym);
-
-            lwr = lwr->ctfeSemantic(sc);
-            lwr = lwr->ctfeInterpret();
-            uinteger_t i1 = lwr->toUInteger();
-
-            upr = upr->ctfeSemantic(sc);
-            upr = upr->ctfeInterpret();
-            uinteger_t i2 = upr->toUInteger();
-
+            sc = sc->startCTFE();
+            lwr = lwr->semantic(sc);
+            upr = upr->semantic(sc);
+            sc = sc->endCTFE();
             sc = sc->pop();
+
+            lwr = lwr->ctfeInterpret();
+            upr = upr->ctfeInterpret();
+            uinteger_t i1 = lwr->toUInteger();
+            uinteger_t i2 = upr->toUInteger();
 
             if (!(i1 <= i2 && i2 <= td->objects->dim))
             {   error(loc, "slice [%llu..%llu] is out of range of [0..%u]", i1, i2, td->objects->dim);

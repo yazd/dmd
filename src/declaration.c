@@ -562,13 +562,6 @@ void AliasDeclaration::semantic(Scope *sc)
     else if (t)
     {
         type = t->semantic(loc, sc);
-
-        /* TypeTuple might have extra info,
-         *    is(typeof(func) PT == __parameters)
-         * Otherwise, strip all redundant informations.
-         */
-        if (type->ty != Ttuple)
-            type = type->merge2();
         //printf("\talias resolved to type %s\n", type->toChars());
     }
     if (overnext)
@@ -688,7 +681,13 @@ Dsymbol *AliasDeclaration::toAlias()
     assert(this != aliassym);
     //static int count; if (++count == 10) *(char*)0=0;
     if (inSemantic)
-    {   error("recursive alias declaration");
+    {
+        error("recursive alias declaration");
+
+        // Avoid breaking "recursive alias" state during errors gagged
+        if (global.isSpeculativeGagging())
+            return this;
+
         aliassym = new AliasDeclaration(loc, ident, Type::terror);
         type = Type::terror;
     }
@@ -860,8 +859,8 @@ void VarDeclaration::semantic(Scope *sc)
 
         // Infering the type requires running semantic,
         // so mark the scope as ctfe if required
-        if (storage_class & (STCmanifest | STCstatic))
-            sc->needctfe++;
+        bool needctfe = (storage_class & (STCmanifest | STCstatic));
+        if (needctfe) sc = sc->startCTFE();
 
         //printf("inferring type for %s with init %s\n", toChars(), init->toChars());
         ArrayInitializer *ai = init->isArrayInitializer();
@@ -884,8 +883,7 @@ void VarDeclaration::semantic(Scope *sc)
         else
             type = init->inferType(sc);
 
-        if (storage_class & (STCmanifest | STCstatic))
-            sc->needctfe--;
+        if (needctfe) sc = sc->endCTFE();
 //      type = type->semantic(loc, sc);
 
         inuse--;
@@ -1464,7 +1462,7 @@ Lnomatch:
                             if (t->ty != Tsarray)
                                 break;
                             dim *= ((TypeSArray *)t)->dim->toInteger();
-                            e1->type = new TypeSArray(t->nextOf(), new IntegerExp(Loc(), dim, Type::tindex));
+                            e1->type = TypeSArray::makeType(Loc(), t->nextOf(), dim);
                         }
                     }
                     e1 = new SliceExp(loc, e1, NULL, NULL);
@@ -1620,13 +1618,14 @@ Lnomatch:
 #if DMDV2
                 if (ei)
                 {
-                    Expression *exp;
-                    exp = ei->exp->syntaxCopy();
-                    if (isDataseg() || (storage_class & STCmanifest))
-                        exp = exp->ctfeSemantic(sc);
-                    else
-                        exp = exp->semantic(sc);
+                    Expression *exp = ei->exp->syntaxCopy();
+
+                    bool needctfe = isDataseg() || (storage_class & STCmanifest);
+                    if (needctfe) sc = sc->startCTFE();
+                    exp = exp->semantic(sc);
                     exp = resolveProperties(sc, exp);
+                    if (needctfe) sc = sc->endCTFE();
+
                     Type *tb = type->toBasetype();
                     Type *ti = exp->type->toBasetype();
 

@@ -19,7 +19,7 @@
 
 class Type;
 class TypeVector;
-class Scope;
+struct Scope;
 class TupleDeclaration;
 class VarDeclaration;
 class FuncDeclaration;
@@ -108,8 +108,6 @@ enum CtfeGoal
 
 #define WANTflags   1
 #define WANTvalue   2
-// A compile-time result is required. Give an error if not possible
-#define WANTinterpret 4
 // Same as WANTvalue, but also expand variables as far as possible
 #define WANTexpand  8
 
@@ -129,7 +127,6 @@ public:
     virtual int apply(apply_fp_t fp, void *param);
     virtual Expression *semantic(Scope *sc);
     Expression *trySemantic(Scope *sc);
-    Expression *ctfeSemantic(Scope *sc);
 
     int dyncast() { return DYNCAST_EXPRESSION; }        // kludge for template.isExpression()
 
@@ -908,6 +905,9 @@ public:
     Expression *compare_overload(Scope *sc, Identifier *id);
     Expression *reorderSettingAAElem(Scope *sc);
 
+    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
+    Expression *buildArrayLoop(Parameters *fparams);
+
     elem *toElemBin(IRState *irs, int op);
 };
 
@@ -925,6 +925,9 @@ public:
     Expression *interpret(InterState *istate, CtfeGoal goal = ctfeNeedRvalue);
 
     Expression *op_overload(Scope *sc);
+
+    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
+    Expression *buildArrayLoop(Parameters *fparams);
 
     int isLvalue();
     Expression *toLvalue(Scope *sc, Expression *ex);
@@ -1334,6 +1337,7 @@ class IndexExp : public BinExp
 public:
     VarDeclaration *lengthVar;
     int modifiable;
+    bool skipboundscheck;
 
     IndexExp(Loc loc, Expression *e1, Expression *e2);
     Expression *syntaxCopy();
@@ -1400,8 +1404,6 @@ class op##AssignExp : public BinAssignExp                       \
 public:                                                         \
     op##AssignExp(Loc loc, Expression *e1, Expression *e2);     \
     S(Expression *semantic(Scope *sc);)                          \
-    X(void buildArrayIdent(OutBuffer *buf, Expressions *arguments);) \
-    X(Expression *buildArrayLoop(Parameters *fparams);)         \
                                                                 \
     Identifier *opId();    /* For operator overloading */       \
                                                                 \
@@ -1450,8 +1452,6 @@ public:
     AddExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     IntRange getIntRange();
 
     // For operator overloading
@@ -1468,8 +1468,6 @@ public:
     MinExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     IntRange getIntRange();
 
     // For operator overloading
@@ -1500,8 +1498,6 @@ public:
     MulExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     IntRange getIntRange();
 
     // For operator overloading
@@ -1518,8 +1514,6 @@ public:
     DivExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     IntRange getIntRange();
 
     // For operator overloading
@@ -1535,8 +1529,6 @@ public:
     ModExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     IntRange getIntRange();
 
     // For operator overloading
@@ -1553,8 +1545,6 @@ public:
     PowExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
 
     // For operator overloading
     Identifier *opId();
@@ -1615,8 +1605,6 @@ public:
     AndExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     IntRange getIntRange();
 
     // For operator overloading
@@ -1633,8 +1621,6 @@ public:
     OrExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     MATCH implicitConvTo(Type *t);
     IntRange getIntRange();
 
@@ -1652,8 +1638,6 @@ public:
     XorExp(Loc loc, Expression *e1, Expression *e2);
     Expression *semantic(Scope *sc);
     Expression *optimize(int result, bool keepLvalue = false);
-    void buildArrayIdent(OutBuffer *buf, Expressions *arguments);
-    Expression *buildArrayLoop(Parameters *fparams);
     MATCH implicitConvTo(Type *t);
     IntRange getIntRange();
 

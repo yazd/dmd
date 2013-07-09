@@ -57,9 +57,10 @@ enum PROT;
 #define SCOPEensure     0x60    // inside out contract code
 #define SCOPEcontract   0x60    // [mask] we're inside contract code
 
-class Scope
+#define SCOPEctfe       0x80    // inside a ctfe-only expression
+
+struct Scope
 {
-public:
     Scope *enclosing;           // enclosing Scope
 
     Module *module;             // Root module
@@ -87,7 +88,6 @@ public:
     int intypeof;               // in typeof(exp)
     bool speculative;            // in __traits(compiles) or typeof(exp)
     int noaccesscheck;          // don't do access checks
-    int needctfe;               // inside a ctfe-only expression
 
     unsigned callSuper;         // primitive flow analysis for constructors
 
@@ -118,6 +118,9 @@ public:
     Scope *push();
     Scope *push(ScopeDsymbol *ss);
     Scope *pop();
+
+    Scope *startCTFE();
+    Scope *endCTFE();
 
     void mergeCallSuper(Loc loc, unsigned cs);
 
