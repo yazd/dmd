@@ -2174,6 +2174,23 @@ void test9536()
 }
 
 /**********************************/
+// 9578
+
+template t9578(alias f) { void tf()() { f(); } }
+
+void g9578a(alias f)()  { f(); }        // Error -> OK
+void g9578b(alias ti)() { ti.tf(); }    // Error -> OK
+
+void test9578()
+{
+    int i = 0;
+    int m() { return i; }
+
+    g9578a!(t9578!m.tf)();
+    g9578b!(t9578!m)();
+}
+
+/**********************************/
 // 9596
 
 int foo9596a(K, V)(inout(       V  [K])) { return 1; }
@@ -2723,6 +2740,35 @@ template foo10558(alias T)
 }
 
 /******************************************/
+// 10592
+
+void test10592()
+{
+    struct A(E)
+    {
+        int put()(const(E)[] data)
+        {
+            return 1;
+        }
+
+        int put()(const(dchar)[] data) if (!is(E == dchar))
+        {
+            return 2;
+        }
+
+        int put(C)(const(C)[] data) if (!is(C == dchar) && !is(E == C))
+        {
+            return 3;
+        }
+    }
+
+    A!char x;
+    assert(x.put("abcde"c) == 1);   // OK: hit 1
+    assert(x.put("abcde"w) == 3);   // NG: this should hit 3
+    assert(x.put("abcde"d) == 2);   // OK: hit 2
+}
+
+/******************************************/
 
 int main()
 {
@@ -2801,6 +2847,7 @@ int main()
     test9143();
     test9266();
     test9536();
+    test9578();
     test9596();
     test9837();
     test9874();
@@ -2808,6 +2855,7 @@ int main()
     test9971();
     test9977();
     test10083();
+    test10592();
 
     printf("Success\n");
     return 0;

@@ -3154,7 +3154,12 @@ MATCH Type::deduceType(Scope *sc, Type *tparam, TemplateParameters *parameters,
     }
 
     if (nextOf())
+    {
+        if (tparam->deco)
+            return implicitConvTo(tparam);
+
         return nextOf()->deduceType(sc, tparam->nextOf(), parameters, dedtypes, wildmatch);
+    }
 
 Lexact:
     return MATCHexact;
@@ -6197,9 +6202,17 @@ int TemplateInstance::hasNestedArgs(Objects *args)
           Lsa:
             sa = sa->toAlias();
             TemplateDeclaration *td = sa->isTemplateDeclaration();
+            if (td)
+            {
+                TemplateInstance *ti = sa->toParent()->isTemplateInstance();
+                if (ti && ti->enclosing)
+                    sa = ti;
+            }
+            TemplateInstance *ti = sa->isTemplateInstance();
             AggregateDeclaration *ad = sa->isAggregateDeclaration();
             Declaration *d = sa->isDeclaration();
             if ((td && td->literal) ||
+                (ti && ti->enclosing) ||
 #if FIXBUG8863
                 (ad && ad->isNested()) ||
 #endif
