@@ -22,6 +22,7 @@
 #include "template.h"
 
 FuncDeclaration *StructDeclaration::xerreq;     // object.xopEquals
+FuncDeclaration *StructDeclaration::xerrcmp;    // object.xopCmp
 
 /********************************* AggregateDeclaration ****************************/
 
@@ -111,6 +112,8 @@ void AggregateDeclaration::semantic3(Scope *sc)
             //assert(sd->xeq == NULL);
             if (sd->xeq == NULL)
                 sd->xeq = sd->buildXopEquals(sc);
+            if (sd->xcmp == NULL)
+                sd->xcmp = sd->buildXopCmp(sc);
         }
         sc = sc->pop();
 
@@ -432,6 +435,7 @@ StructDeclaration::StructDeclaration(Loc loc, Identifier *id)
     postblit = NULL;
 
     xeq = NULL;
+    xcmp = NULL;
     alignment = 0;
 #endif
     arg1type = NULL;
@@ -539,15 +543,10 @@ void StructDeclaration::semantic(Scope *sc)
      * resolve individual members like enums.
      */
     for (size_t i = 0; i < members->dim; i++)
-    {   Dsymbol *s = (*members)[i];
-        /* There are problems doing this in the general case because
-         * Scope keeps track of things like 'offset'
-         */
-        //if (s->isEnumDeclaration() || (s->isAggregateDeclaration() && s->ident))
-        {
-            //printf("struct: setScope %s %s\n", s->kind(), s->toChars());
-            s->setScope(sc2);
-        }
+    {
+        Dsymbol *s = (*members)[i];
+        //printf("struct: setScope %s %s\n", s->kind(), s->toChars());
+        s->setScope(sc2);
     }
 
     for (size_t i = 0; i < members->dim; i++)

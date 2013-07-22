@@ -4509,7 +4509,7 @@ Type *TypeAArray::semantic(Loc loc, Scope *sc)
             return tsa->semantic(loc, sc);
         }
         else if (t)
-            index = t;
+            index = t->semantic(loc, sc);
         else
         {   index->error(loc, "index is not a type or an expression");
             return Type::terror;
@@ -6795,7 +6795,8 @@ Expression *TypeIdentifier::toExpression()
             e = new DotIdExp(loc, e, (Identifier *)id);
         }
         else
-        {   assert(id->dyncast() == DYNCAST_DSYMBOL);
+        {
+            assert(id->dyncast() == DYNCAST_DSYMBOL);
             TemplateInstance *ti = ((Dsymbol *)id)->isTemplateInstance();
             assert(ti);
             e = new DotTemplateInstanceExp(loc, e, ti->name, ti->tiargs);
@@ -6940,7 +6941,24 @@ Type *TypeInstance::reliesOnTident(TemplateParameters *tparams)
 
 Expression *TypeInstance::toExpression()
 {
-    return new ScopeExp(loc, tempinst);
+    Expression *e = new ScopeExp(loc, tempinst);
+    for (size_t i = 0; i < idents.dim; i++)
+    {
+        RootObject *id = idents[i];
+        if (id->dyncast() == DYNCAST_IDENTIFIER)
+        {
+            e = new DotIdExp(loc, e, (Identifier *)id);
+        }
+        else
+        {
+            assert(id->dyncast() == DYNCAST_DSYMBOL);
+            TemplateInstance *ti = ((Dsymbol *)id)->isTemplateInstance();
+            assert(ti);
+            e = new DotTemplateInstanceExp(loc, e, ti->name, ti->tiargs);
+        }
+    }
+
+    return e;
 }
 
 
@@ -7269,7 +7287,11 @@ Type *TypeEnum::syntaxCopy()
 Type *TypeEnum::semantic(Loc loc, Scope *sc)
 {
     //printf("TypeEnum::semantic() %s\n", toChars());
-    //sym->semantic(sc);
+    if (!sym->isdone)
+    {
+        assert(sym->scope);
+        sym->semantic(sym->scope);
+    }
     return merge();
 }
 
@@ -7942,10 +7964,10 @@ Expression *TypeStruct::dotExp(Scope *sc, Expression *e, Identifier *ident, int 
             exps->push(new DotVarExp(ev->loc, ev, v));
         }
         e = new TupleExp(e->loc, e0, exps);
-        sc = sc->push();
-        sc->noaccesscheck = 1;
-        e = e->semantic(sc);
-        sc->pop();
+        Scope *sc2 = sc->push();
+        sc2->flags = sc->flags | SCOPEnoaccesscheck;
+        e = e->semantic(sc2);
+        sc2->pop();
         return e;
     }
 
@@ -8482,17 +8504,18 @@ Expression *TypeClass::dotExp(Scope *sc, Expression *e, Identifier *ident, int f
             ev = new VarExp(e->loc, vd);
         }
         for (size_t i = 0; i < sym->fields.dim; i++)
-        {   VarDeclaration *v = sym->fields[i];
+        {
+            VarDeclaration *v = sym->fields[i];
             // Don't include hidden 'this' pointer
             if (v->isThisDeclaration())
                 continue;
             exps->push(new DotVarExp(ev->loc, ev, v));
         }
         e = new TupleExp(e->loc, e0, exps);
-        sc = sc->push();
-        sc->noaccesscheck = 1;
-        e = e->semantic(sc);
-        sc->pop();
+        Scope *sc2 = sc->push();
+        sc2->flags = sc->flags | SCOPEnoaccesscheck;
+        e = e->semantic(sc2);
+        sc2->pop();
         return e;
     }
 

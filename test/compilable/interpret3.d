@@ -331,6 +331,85 @@ static assert(!is(typeof(compiles!(rshr10252(80)))));
 static assert(is(typeof(compiles!(ushr10252(2)))));
 static assert(!is(typeof(compiles!(ushr10252(60)))));
 
+/**************************************************
+  1982 CTFE null problems
+**************************************************/
+
+enum a1982 = [1, 2, 3];
+static assert (a1982 !is null);
+
+string foo1982() { return null; }
+static assert (foo1982() is null);
+static assert (!foo1982().length);
+
+static assert (null is null);
+
+/**************************************************
+  7988 CTFE return values should be allowed in compile-time expressions
+**************************************************/
+
+class X7988 { int y; this() { y = 2; }}
+static assert( (new X7988).y == 2);
+
+/**************************************************
+  8253 ICE: calling of member function of non-CTFE class variable
+**************************************************/
+
+class Bug8253 {
+    bool j(){
+        return true;
+    }
+}
+Bug8253 m8253;
+static assert(!is(typeof(compiles!(m8253.j()))));
+
+/**************************************************
+  8285 Issue with slice returned from CTFE function
+**************************************************/
+
+string foo8285() {
+     string s = "ab";
+     return s[0 .. $];
+}
+
+template T8285b(string s) { }
+
+template T8285a() {
+     enum s = foo8285();
+     alias T8285b!(s) t2;
+}
+
+int bar8285() {
+     alias T8285a!() t1;
+     return 0;
+}
+
+int baz8285(int x) {
+     return 0;
+}
+
+static assert(baz8285(bar8285()) == 0);
+
+// test case 2
+
+string xbar8285() {
+    string s = "ab";
+    return s[0..$];
+}
+
+template xT8285a() {
+    enum xT8285a = xbar8285()[0..$];
+}
+
+string xbaz8285() {
+    return xT8285a!();
+}
+
+string xfoo8285(string s) {
+    return s;
+}
+
+static assert(xfoo8285(xbaz8285()) == "ab");
 
 /**************************************************
   'this' parameter bug revealed during refactoring
@@ -1541,16 +1620,28 @@ static assert(bug6001h());
 
 /**************************************************
    10243 wrong code *&arr as ref parameter
+   10551 wrong code (&arr)[0] as ref parameter
 **************************************************/
 
 void bug10243(ref int n)
 { n = 3; }
+
+void bug10551(int *p)
+{
+   bug10243(p[0]);
+}
 
 bool test10243()
 {
     int[1] arr;
     bug10243(*arr.ptr);
     assert(arr[0] == 3);
+    int [1] arr2;
+    bug10551(arr2.ptr);
+    assert(arr2[0] == 3);
+    int v;
+    bug10551(&v);
+    assert(v == 3);
     return true;
 }
 
@@ -4895,6 +4986,71 @@ void ice9445(void delegate() expr, void function() f2)
 }
 
 /**************************************************
+    10452 delegate ==
+**************************************************/
+
+struct S10452 {
+    bool func() { return true; }
+}
+
+struct Outer10452 {
+    S10452 inner;
+}
+
+class C10452 {
+    bool func() { return true; }
+}
+
+bool delegate() ref10452(ref S10452 s)
+{
+    return &s.func;
+}
+
+bool test10452()
+{
+    bool delegate() bar = () { return true; };
+
+    assert(bar !is null);
+    assert(bar is bar);
+
+    S10452 bag;
+    S10452[6] bad;
+    Outer10452 outer;
+    C10452 tag = new C10452;
+
+    auto rat = &outer.inner.func;
+    assert(rat == rat);
+    auto tat = &tag.func;
+    assert(tat == tat);
+
+    auto bat = &outer.inner.func;
+    auto mat = &bad[2].func;
+    assert(mat is mat);
+    assert(rat == bat);
+
+    auto zat = &bag.func;
+    auto cat = &bag.func;
+    assert(zat == zat);
+    assert(zat == cat);
+
+    auto drat = ref10452(bag);
+    assert(cat == drat);
+    assert(drat == drat);
+    drat = ref10452(bad[2]);
+    assert( drat == mat);
+    assert(tat != rat);
+    assert(zat != rat);
+    assert(rat != cat);
+    assert(zat != bar);
+    assert(tat != cat);
+    cat = bar;
+    assert(cat == bar);
+    return true;
+}
+static assert(test10452());
+
+
+/**************************************************
     7162 and 4711
 **************************************************/
 
@@ -5452,7 +5608,7 @@ static assert(!__traits(compiles, {static Test76 t76 = new Test76(0); return t76
 
 /***** Bug 5678 *********************************/
 
-struct Bug5678 
+struct Bug5678
 {
     this(int) {}
 }

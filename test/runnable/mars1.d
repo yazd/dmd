@@ -905,6 +905,51 @@ void testandand()
 }
 
 ////////////////////////////////////////////////////////////////////////
+
+uint or1(ubyte x)
+{
+    return x | (x<<8) | (x<<16) | (x<<24) | (x * 3);
+}
+
+void testor_combine()
+{
+    printf("%x\n", or1(1));
+    assert(or1(5) == 5 * (0x1010101 | 3));
+}
+
+////////////////////////////////////////////////////////////////////////
+
+
+int shrshl(int i) {
+  return ((i+1)>>1)<<1;
+}
+
+void testshrshl()
+{
+    assert(shrshl(6) == 6);
+    assert(shrshl(7) == 8);
+}
+
+////////////////////////////////////////////////////////////////////////
+
+struct S1 
+{ 
+    cdouble val; 
+}
+
+void formatTest(S1 s, double re, double im)
+{
+    assert(s.val.re == re);
+    assert(s.val.im == im);
+}
+
+void test10639()
+{
+    S1 s = S1(3+2.25i);
+    formatTest(s, 3, 2.25);
+}
+
+////////////////////////////////////////////////////////////////////////
  
 int main()
 {
@@ -925,6 +970,9 @@ int main()
     testoror();
     testbt();
     testandand();
+    testor_combine();
+    testshrshl();
+    test10639();
     printf("Success\n");
     return 0;
 }

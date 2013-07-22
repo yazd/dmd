@@ -144,25 +144,17 @@ void FuncDeclaration::semantic(Scope *sc)
         return;
     }
 
+    if (semanticRun >= PASSsemanticdone)
+        return;
+    assert(semanticRun <= PASSsemantic);
+    semanticRun = PASSsemantic;
+
     parent = sc->parent;
     Dsymbol *parent = toParent();
 
-    if (semanticRun >= PASSsemanticdone)
-    {
-        if (!parent->isClassDeclaration())
-        {
-            return;
-        }
-        // need to re-run semantic() in order to set the class's vtbl[]
-    }
-    else
-    {
-        assert(semanticRun <= PASSsemantic);
-        semanticRun = PASSsemantic;
-    }
-
     if (scope)
-    {   sc = scope;
+    {
+        sc = scope;
         scope = NULL;
     }
 
@@ -1328,7 +1320,9 @@ void FuncDeclaration::semantic3(Scope *sc)
                 }
             }
 
-            if (isCtorDeclaration() && ad)
+            if (fbody->isErrorStatement())
+                ;
+            else if (isCtorDeclaration() && ad)
             {
 #if DMDV2
                 // Check for errors related to 'nothrow'.

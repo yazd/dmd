@@ -1629,6 +1629,70 @@ STATIC elem *elor(elem *e, goal_t goal)
   L1:
     ;
 
+    if (OPTIMIZER)
+    {
+        /* Replace:
+         *   i | (i << c1) | (i << c2) | (i * c3) ...
+         * with:
+         *   i * (1 + (1 << c1) + (1 << c2) + c3 ...)
+         */
+        elem *ops[8];    // 8 bytes in a 64 bit register, not likely to need more
+        int opsi = 0;
+        elem *ei = NULL;
+        targ_ullong bits = 0;
+        if (fillinops(ops, &opsi, sizeof(ops)/sizeof(ops[0]), OPor, e) && opsi > 1)
+        {
+            for (int i = 0; i < opsi; ++i)
+            {
+                elem *eq = ops[i];
+                if (eq->Eoper == OPshl && eq->E2->Eoper == OPconst)
+                {
+                    bits |= 1ULL << el_tolong(eq->E2);
+                    eq = eq->E1;
+                }
+                else if (eq->Eoper == OPmul && eq->E2->Eoper == OPconst)
+                {
+                    bits |= el_tolong(eq->E2);
+                    eq = eq->E1;
+                }
+                else
+                    bits |= 1;
+                if (el_sideeffect(eq))
+                    goto L2;
+                if (ei)
+                {
+                    if (!el_match(ei, eq))
+                        goto L2;
+                }
+                else
+                {
+                    ei = eq;
+                }
+            }
+            tym_t ty = e->Ety;
+
+            // Free unused nodes
+            el_opFree(e, OPor);
+            for (int i = 0; i < opsi; ++i)
+            {
+                elem *eq = ops[i];
+                if ((eq->Eoper == OPshl || eq->Eoper == OPmul) &&
+                    eq->E2->Eoper == OPconst)
+                {
+                    if (eq->E1 == ei)
+                        eq->E1 = NULL;
+                }
+                if (eq != ei)
+                    el_free(eq);
+            }
+
+            e = el_bin(OPmul, ty, ei, el_long(ty, bits));
+            return e;
+        }
+
+      L2: ;
+    }
+
     return elbitwise(e, goal);
 }
 
@@ -2956,8 +3020,6 @@ elem * elstruct(elem *e, goal_t goal)
         return optelem(e, goal);
     }
 
-    //printf("\tnumbytes = %d\n", (int)e->Enumbytes);
-
     if (!e->ET)
         return e;
     //printf("\tnumbytes = %d\n", (int)type_size(e->ET));
@@ -2974,6 +3036,7 @@ elem * elstruct(elem *e, goal_t goal)
     }
 
     unsigned sz = type_size(e->ET);
+    //printf("\tsz = %d\n", (int)sz);
     switch ((int)sz)
     {
         case 1:  tym = TYchar;   goto L1;
@@ -2988,7 +3051,7 @@ elem * elstruct(elem *e, goal_t goal)
         case 6:
         case 7:  tym = TYllong;
         L2:
-            if (config.exe == EX_WIN64)
+            if (e->Eoper == OPstrpar && config.exe == EX_WIN64)
             {
                  goto L1;
             }
@@ -4395,6 +4458,22 @@ STATIC elem *elshl(elem *e, goal_t goal)
     if (e->E1->Eoper == OPconst && !boolres(e->E1))             // if e1 is 0
     {   e->E1->Ety = e->Ety;
         e = el_selecte1(e);             // (0 << e2) => 0
+    }
+    if (OPTIMIZER &&
+        e->E2->Eoper == OPconst &&
+        (e->E1->Eoper == OPshr || e->E1->Eoper == OPashr) &&
+        e->E1->E2->Eoper == OPconst &&
+        el_tolong(e->E2) == el_tolong(e->E1->E2))
+    {   /* Rewrite:
+         *  (x >> c) << c)
+         * with:
+         *  x & ~((1 << c) - 1);
+         */
+        targ_ullong c = el_tolong(e->E2);
+        e = el_selecte1(e);
+        e = el_selecte1(e);
+        e = el_bin(OPand, e->Ety, e, el_long(e->Ety, ~((1ULL << c) - 1)));
+        return optelem(e, goal);
     }
     return e;
 }

@@ -832,6 +832,9 @@ void VarDeclaration::semantic(Scope *sc)
 //      return;
 //    sem = SemanticIn;
 
+    if (sem >= SemanticDone)
+        return;
+
     Scope *scx = NULL;
     if (scope)
     {   sc = scope;
@@ -1611,7 +1614,7 @@ Lnomatch:
              * Ignore failure.
              */
 
-            if (!global.errors && !inferred)
+            if (!inferred)
             {
                 unsigned errors = global.errors;
                 inuse++;

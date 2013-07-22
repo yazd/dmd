@@ -2085,7 +2085,27 @@ Expression *DelegateExp::interpret(InterState *istate, CtfeGoal goal)
 #if LOG
     printf("%s DelegateExp::interpret() %s\n", loc.toChars(), toChars());
 #endif
-    return this;
+    // TODO: Really we should create a CTFE-only delegate expression
+    // of a pointer and a funcptr.
+
+    // If it is &nestedfunc, just return it
+    // TODO: We should save the context pointer
+    if (e1->op == TOKvar && ((VarExp *)e1)->var->isFuncDeclaration())
+        return this;
+
+    // If it has already been CTFE'd, just return it
+    if (e1->op == TOKstructliteral || e1->op == TOKclassreference)
+        return this;
+
+    // Else change it into &structliteral.func or &classref.func
+    Expression *e = e1->interpret(istate, ctfeNeedLvalue);
+
+    if (exceptionOrCantInterpret(e))
+        return e;
+
+    e = new DelegateExp(loc, e, func);
+    e->type = type;
+    return e;
 }
 
 
@@ -2161,7 +2181,10 @@ Expression *getVarExp(Loc loc, InterState *istate, Declaration *d, CtfeGoal goal
 #else
         if (v->isConst() && v->init && !v->isCTFE())
 #endif
-        {   e = v->init->toExpression(v->type);
+        {
+            if(v->scope)
+                v->init->semantic(v->scope, v->type, INITinterpret); // might not be run on aggregate members
+            e = v->init->toExpression(v->type);
             if (v->inuse)
             {
                 error(loc, "circular initialization of %s", v->toChars());
@@ -4885,6 +4908,15 @@ Expression *IndexExp::interpret(InterState *istate, CtfeGoal goal)
                     indx+ofs, len);
                 return EXP_CANT_INTERPRET;
             }
+            if (goal == ctfeNeedLvalueRef)
+            {
+                // if we need a reference, IndexExp shouldn't be interpreting
+                // the expression to a value, it should stay as a reference
+                Expression *e = new IndexExp(loc, agg,
+                    ofs ? new IntegerExp(loc,indx + ofs, e2->type) : e2);
+                e->type = type;
+                return e;
+            }
             return ctfeIndex(loc, type, agg, indx+ofs);
         }
         else
@@ -4899,6 +4931,10 @@ Expression *IndexExp::interpret(InterState *istate, CtfeGoal goal)
                 error("pointer index [%lld] lies outside memory block [0..1]",
                     indx+ofs);
                 return EXP_CANT_INTERPRET;
+            }
+            if (goal == ctfeNeedLvalueRef)
+            {
+                return paintTypeOntoLiteral(type, agg);
             }
             return agg->interpret(istate);
         }

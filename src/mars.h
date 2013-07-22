@@ -80,10 +80,6 @@ the target object file format:
 #endif
 void unittests();
 
-#ifdef IN_GCC
-/* Changes for the GDC compiler by David Friedman */
-#endif
-
 #define DMDV1   0
 #define DMDV2   1       // Version 2.0 features
 #define SNAN_DEFAULT_INIT DMDV2 // if floats are default initialized to signalling NaN
@@ -287,6 +283,12 @@ struct Global
      * Return true if errors occured while gagged.
      */
     bool endGagging(unsigned oldGagged);
+
+    /*  Increment the error count to record that an error
+     *  has occured in the current context. An error message
+     *  may or may not have been printed.
+     */
+    void increaseErrorCount();
 
     void init();
 };
