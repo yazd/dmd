@@ -1202,6 +1202,12 @@ Lnomatch:
                 const char *s = (storage_class & STCimmutable) ? "immutable" : "const";
                 fprintf(stderr, "%s: %s.%s is %s field\n", p ? p : "", ad->toPrettyChars(), toChars(), s);
             }
+            storage_class |= STCfield;
+#if DMDV2
+            if (tbn->ty == Tstruct && ((TypeStruct *)tbn)->sym->noDefaultCtor ||
+                tbn->ty == Tclass  && ((TypeClass  *)tbn)->sym->noDefaultCtor)
+                aad->noDefaultCtor = TRUE;
+#endif
 #else
             if (storage_class & (STCconst | STCimmutable) && init)
             {
@@ -1212,7 +1218,6 @@ Lnomatch:
                     storage_class |= STCstatic;
             }
             else
-#endif
             {
                 storage_class |= STCfield;
 #if DMDV2
@@ -1221,6 +1226,7 @@ Lnomatch:
                     aad->noDefaultCtor = TRUE;
 #endif
             }
+#endif
         }
 
         InterfaceDeclaration *id = parent->isInterfaceDeclaration();
@@ -1273,7 +1279,16 @@ Lnomatch:
         {
             if (func->fes)
                 func = func->fes->func;
-            if (!((TypeFunction *)func->type)->iswild)
+            bool isWild = false;
+            for (FuncDeclaration *fd = func; fd; fd = fd->toParent2()->isFuncDeclaration())
+            {
+                if (((TypeFunction *)fd->type)->iswild)
+                {
+                    isWild = true;
+                    break;
+                }
+            }
+            if (!isWild)
             {
                 error("inout variables can only be declared inside inout functions");
             }
@@ -1396,7 +1411,6 @@ Lnomatch:
             init = new ExpInitializer(e->loc, e);
         }
 
-        StructInitializer *si = init->isStructInitializer();
         ExpInitializer *ei = init->isExpInitializer();
 
         if (ei && isScope())
@@ -2346,7 +2360,7 @@ void ClassInfoDeclaration::semantic(Scope *sc)
 /********************************* TypeInfoDeclaration ****************************/
 
 TypeInfoDeclaration::TypeInfoDeclaration(Type *tinfo, int internal)
-    : VarDeclaration(Loc(), Type::typeinfo->type, tinfo->getTypeInfoIdent(internal), NULL)
+    : VarDeclaration(Loc(), Type::dtypeinfo->type, tinfo->getTypeInfoIdent(internal), NULL)
 {
     this->tinfo = tinfo;
     storage_class = STCstatic | STCgshared;

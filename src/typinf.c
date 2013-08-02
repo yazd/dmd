@@ -111,7 +111,7 @@ Expression *Type::getInternalTypeInfo(Scope *sc)
 Expression *Type::getTypeInfo(Scope *sc)
 {
     //printf("Type::getTypeInfo() %p, %s\n", this, toChars());
-    if (!Type::typeinfo)
+    if (!Type::dtypeinfo)
     {
         error(Loc(), "TypeInfo not found. object.d may be incorrectly installed or corrupt, compile with -v switch");
         fatal();
@@ -234,9 +234,9 @@ TypeInfoDeclaration *TypeTuple::getTypeInfoDeclaration()
 void TypeInfoDeclaration::toDt(dt_t **pdt)
 {
     //printf("TypeInfoDeclaration::toDt() %s\n", toChars());
-    verifyStructSize(Type::typeinfo, 2 * Target::ptrsize);
+    verifyStructSize(Type::dtypeinfo, 2 * Target::ptrsize);
 
-    dtxoff(pdt, Type::typeinfo->toVtblSymbol(), 0); // vtbl for TypeInfo
+    dtxoff(pdt, Type::dtypeinfo->toVtblSymbol(), 0); // vtbl for TypeInfo
     dtsize_t(pdt, 0);                        // monitor
 }
 
@@ -575,16 +575,14 @@ void TypeInfoStructDeclaration::toDt(dt_t **pdt)
 
     if (!tftohash)
     {
-        Scope sc;
-
         /* const hash_t toHash();
          */
         tftohash = new TypeFunction(NULL, Type::thash_t, 0, LINKd);
         tftohash->mod = MODconst;
-        tftohash = (TypeFunction *)tftohash->semantic(Loc(), &sc);
+        tftohash = (TypeFunction *)tftohash->merge();
 
         tftostring = new TypeFunction(NULL, Type::tstring, 0, LINKd);
-        tftostring = (TypeFunction *)tftostring->semantic(Loc(), &sc);
+        tftostring = (TypeFunction *)tftostring->merge();
     }
 
     s = search_function(sd, Id::tohash);

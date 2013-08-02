@@ -785,7 +785,6 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
     Type *tb = type->toBasetype();
     assert(tb->ty == Tfunction);
     TypeFunction *tf = (TypeFunction *)tb;
-    Type *tret = tf->next->toBasetype();
     if (tf->varargs && arguments &&
         ((parameters && arguments->dim != parameters->dim) || (!parameters && arguments->dim)))
     {
@@ -1473,7 +1472,6 @@ Expression *DoStatement::interpret(InterState *istate)
         if (istate->gotoTarget && istate->gotoTarget != this)
             break; // continue at a higher level
 
-    Lcontinue:
         istate->gotoTarget = NULL;
         e = condition->interpret(istate);
         if (exceptionOrCantInterpret(e))
@@ -1982,7 +1980,6 @@ Expression *SymOffExp::interpret(InterState *istate, CtfeGoal goal)
     }
     // Check for taking an address of a shared variable.
     // If the shared variable is an array, the offset might not be zero.
-    VarDeclaration *vd = var->isVarDeclaration();
     Type *fromType = NULL;
     if (var->type->ty == Tarray || var->type->ty == Tsarray)
     {
@@ -2024,7 +2021,6 @@ Expression *SymOffExp::interpret(InterState *istate, CtfeGoal goal)
             return EXP_CANT_INTERPRET;
         }
 
-        TypeArray *tar = (TypeArray *)val->type;
         dinteger_t sz = pointee->size();
         dinteger_t indx = offset/sz;
         assert(sz * indx == offset);
@@ -2852,7 +2848,6 @@ Expression *UnaExp::interpret(InterState *istate,  CtfeGoal goal)
     return e;
 }
 
-typedef Expression *(*fp_t)(Type *, Expression *, Expression *);
 
 Expression *BinExp::interpretCommon(InterState *istate, CtfeGoal goal, fp_t fp)
 {   Expression *e;
@@ -2929,8 +2924,6 @@ Expression *BinExp::interpretCommon(InterState *istate, CtfeGoal goal, fp_t fp)
         error("%s cannot be interpreted at compile time", toChars());
     return e;
 }
-
-typedef int (*fp2_t)(Loc loc, TOK, Expression *, Expression *);
 
 Expression *BinExp::interpretCompareCommon(InterState *istate, CtfeGoal goal, fp2_t fp)
 {
@@ -3775,7 +3768,6 @@ bool interpretAssignToIndex(InterState *istate, Loc loc,
         aggregate->op == TOKslice || aggregate->op == TOKcall ||
         aggregate->op == TOKstar)
     {
-        Expression *origagg = aggregate;
         aggregate = aggregate->interpret(istate, ctfeNeedLvalue);
         if (exceptionOrCantInterpret(aggregate))
             return false;
@@ -3848,7 +3840,7 @@ bool interpretAssignToIndex(InterState *istate, Loc loc,
     }
     if (existingSE)
     {
-        unsigned char *s = (unsigned char *)existingSE->string;
+        utf8_t *s = (utf8_t *)existingSE->string;
         if (!existingSE->ownedByCtfe)
         {
             originalExp->error("cannot modify read-only string literal %s", ie->e1->toChars());
@@ -4111,7 +4103,7 @@ Expression *interpretAssignToSlice(InterState *istate, CtfeGoal goal, Loc loc,
     else if (existingSE)
     {   // String literal block slice assign
         unsigned value = newval->toInteger();
-        unsigned char *s = (unsigned char *)existingSE->string;
+        utf8_t *s = (utf8_t *)existingSE->string;
         for (size_t j = 0; j < upperbound-lowerbound; j++)
         {
             switch (existingSE->sz)
@@ -5902,11 +5894,7 @@ Expression *interpret_aaApply(InterState *istate, Expression *aa, Expression *de
     assert(fd && fd->fbody);
     assert(fd->parameters);
     int numParams = fd->parameters->dim;
-    assert(numParams == 1 || numParams==2);
-
-    Type *valueType = (*fd->parameters)[numParams-1]->type;
-    Type *keyType = numParams == 2 ? (*fd->parameters)[0]->type
-                                   : Type::tsize_t;
+    assert(numParams == 1 || numParams == 2);
 
     Parameter *valueArg = Parameter::getNth(((TypeFunction *)fd->type)->parameters, numParams - 1);
     bool wantRefValue = 0 != (valueArg->storageClass & (STCout | STCref));
@@ -5999,7 +5987,7 @@ Expression *foreachApplyUtf(InterState *istate, Expression *str, Expression *del
     Expression *eresult;
 
     // Buffers for encoding; also used for decoding array literals
-    unsigned char utf8buf[4];
+    utf8_t utf8buf[4];
     unsigned short utf16buf[2];
 
     size_t start = rvs ? len : 0;
@@ -6029,7 +6017,7 @@ Expression *foreachApplyUtf(InterState *istate, Expression *str, Expression *del
                     {
                         Expression * r = (*ale->elements)[indx];
                         assert(r->op == TOKint64);
-                        unsigned char x = (unsigned char)(((IntegerExp *)r)->value);
+                        utf8_t x = (utf8_t)(((IntegerExp *)r)->value);
                         if ( (x & 0xC0) != 0x80)
                             break;
                         ++buflen;
@@ -6041,7 +6029,7 @@ Expression *foreachApplyUtf(InterState *istate, Expression *str, Expression *del
                 {
                     Expression * r = (*ale->elements)[indx + i];
                     assert(r->op == TOKint64);
-                    utf8buf[i] = (unsigned char)(((IntegerExp *)r)->value);
+                    utf8buf[i] = (utf8_t)(((IntegerExp *)r)->value);
                 }
                 n = 0;
                 errmsg = utf_decodeChar(&utf8buf[0], buflen, &n, &rawvalue);
@@ -6097,13 +6085,13 @@ Expression *foreachApplyUtf(InterState *istate, Expression *str, Expression *del
             case 1:
                 if (rvs)
                 {   // find the start of the string
-                    unsigned char *s = (unsigned char *)se->string;
+                    utf8_t *s = (utf8_t *)se->string;
                     --indx;
                     while (indx > 0 && ((s[indx]&0xC0)==0x80))
                         --indx;
                     saveindx = indx;
                 }
-                errmsg = utf_decodeChar((unsigned char *)se->string, se->len, &indx, &rawvalue);
+                errmsg = utf_decodeChar((utf8_t *)se->string, se->len, &indx, &rawvalue);
                 if (rvs)
                     indx = saveindx;
                 break;

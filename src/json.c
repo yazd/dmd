@@ -128,7 +128,7 @@ void JsonOut::stringPart(const char *s)
 {
     for (; *s; s++)
     {
-        unsigned char c = (unsigned char) *s;
+        utf8_t c = (utf8_t) *s;
         switch (c)
         {
             case '\n':
@@ -970,9 +970,10 @@ void TemplateDeclaration::toJson(JsonOut *json)
             if (s->isTemplateThisParameter())
                 json->property("kind", "this");
             else
-#endif
                 json->property("kind", "type");
-
+#else
+            json->property("kind", "type");
+#endif
             json->property("type", "deco", type->specType);
 
             json->property("default", "defaultDeco", type->defaultType);

@@ -59,7 +59,7 @@ int Tptrdiff_t = Tint32;
 
 /***************************** Type *****************************/
 
-ClassDeclaration *Type::typeinfo;
+ClassDeclaration *Type::dtypeinfo;
 ClassDeclaration *Type::typeinfoclass;
 ClassDeclaration *Type::typeinfointerface;
 ClassDeclaration *Type::typeinfostruct;
@@ -1724,7 +1724,7 @@ Type *Type::merge()
         }
         else
         {
-            sv->ptrvalue = (t = stripDefaultArgs(t));
+            sv->ptrvalue = (char *)(t = stripDefaultArgs(t));
             deco = t->deco = (char *)sv->toDchars();
             //printf("new value, deco = '%s' %p\n", t->deco, t->deco);
         }
@@ -3598,11 +3598,19 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident, int f
 
     if (ident == Id::reverse && (n->ty == Tchar || n->ty == Twchar))
     {
-        static const char *name[2] = { "_adReverseChar", "_adReverseWchar" };
+        static const char *reverseName[2] = { "_adReverseChar", "_adReverseWchar" };
+        static FuncDeclaration *reverseFd[2] = { NULL, NULL };
 
-        const char *nm = name[n->ty == Twchar];
-        FuncDeclaration *fd = FuncDeclaration::genCfunc(n->arrayOf(), nm);
-        Expression *ec = new VarExp(Loc(), fd);
+        int i = n->ty == Twchar;
+        if (!reverseFd[i]) {
+            Parameters *args = new Parameters;
+            Type *next = n->ty == Twchar ? Type::twchar : Type::tchar;
+            Type *arrty = next->arrayOf();
+            args->push(new Parameter(STCin, arrty, NULL, NULL));
+            reverseFd[i] = FuncDeclaration::genCfunc(args, arrty, reverseName[i]);
+        }
+
+        Expression *ec = new VarExp(Loc(), reverseFd[i]);
         e = e->castTo(sc, n->arrayOf());        // convert to dynamic array
         Expressions *arguments = new Expressions();
         arguments->push(e);
@@ -3611,9 +3619,19 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident, int f
     }
     else if (ident == Id::sort && (n->ty == Tchar || n->ty == Twchar))
     {
-        const char *nm = n->ty == Twchar ? "_adSortWchar" : "_adSortChar";
-        FuncDeclaration *fd = FuncDeclaration::genCfunc(n->arrayOf(), nm);
-        Expression *ec = new VarExp(Loc(), fd);
+        static const char *sortName[2] = { "_adSortChar", "_adSortWchar" };
+        static FuncDeclaration *sortFd[2] = { NULL, NULL };
+
+        int i = n->ty == Twchar;
+        if (!sortFd[i]) {
+            Parameters *args = new Parameters;
+            Type *next = n->ty == Twchar ? Type::twchar : Type::tchar;
+            Type *arrty = next->arrayOf();
+            args->push(new Parameter(STCin, arrty, NULL, NULL));
+            sortFd[i] = FuncDeclaration::genCfunc(args, arrty, sortName[i]);
+        }
+
+        Expression *ec = new VarExp(Loc(), sortFd[i]);
         e = e->castTo(sc, n->arrayOf());        // convert to dynamic array
         Expressions *arguments = new Expressions();
         arguments->push(e);
@@ -3631,7 +3649,27 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident, int f
         Expression *olde = e;
         assert(size);
         dup = (ident == Id::dup || ident == Id::idup);
-        fd = FuncDeclaration::genCfunc(tvoid->arrayOf(), dup ? Id::adDup : Id::adReverse);
+
+        if (dup) {
+            static FuncDeclaration *adDup_fd = NULL;
+            if (!adDup_fd) {
+                Parameters* args = new Parameters;
+                args->push(new Parameter(STCin, Type::dtypeinfo->type, NULL, NULL));
+                args->push(new Parameter(STCin, Type::tvoid->arrayOf(), NULL, NULL));
+                adDup_fd = FuncDeclaration::genCfunc(args, Type::tvoid->arrayOf(), Id::adDup);
+            }
+            fd = adDup_fd;
+        } else {
+            static FuncDeclaration *adReverse_fd = NULL;
+            if (!adReverse_fd) {
+                Parameters* args = new Parameters;
+                args->push(new Parameter(STCin, Type::tvoid->arrayOf(), NULL, NULL));
+                args->push(new Parameter(STCin, Type::tsize_t, NULL, NULL));
+                adReverse_fd = FuncDeclaration::genCfunc(args, Type::tvoid->arrayOf(), Id::adReverse);
+            }
+            fd = adReverse_fd;
+        }
+
         ec = new VarExp(Loc(), fd);
         e = e->castTo(sc, n->arrayOf());        // convert to dynamic array
         arguments = new Expressions();
@@ -3665,11 +3703,16 @@ Expression *TypeArray::dotExp(Scope *sc, Expression *e, Identifier *ident, int f
     }
     else if (ident == Id::sort)
     {
+        static FuncDeclaration *fd = NULL;
         Expression *ec;
-        FuncDeclaration *fd;
         Expressions *arguments;
 
-        fd = FuncDeclaration::genCfunc(tvoid->arrayOf(), "_adSort");
+        if (!fd) {
+            Parameters* args = new Parameters;
+            args->push(new Parameter(STCin, Type::tvoid->arrayOf(), NULL, NULL));
+            args->push(new Parameter(STCin, Type::dtypeinfo->type, NULL, NULL));
+            fd = FuncDeclaration::genCfunc(args, Type::tvoid->arrayOf(), "_adSort");
+        }
         ec = new VarExp(Loc(), fd);
         e = e->castTo(sc, n->arrayOf());        // convert to dynamic array
         arguments = new Expressions();
@@ -6498,7 +6541,6 @@ void TypeQualified::resolveHelper(Loc loc, Scope *sc,
                 }
                 else
                 {
-                  Lerror:
                     if (id->dyncast() == DYNCAST_DSYMBOL)
                     {   // searchX already handles errors for template instances
                         assert(global.errors);
@@ -7385,14 +7427,24 @@ Expression *TypeEnum::getProperty(Loc loc, Identifier *ident, int flag)
 
     if (ident == Id::max)
     {
-        if (!sym->maxval)
+        if (!sym->isdone)
             goto Lfwd;
+        if (!sym->maxval)
+        {
+            error(loc, "enum %s has no .max property because the base type %s is not an integral type", toChars(), sym->memtype->toChars());
+            return new ErrorExp;
+        }
         e = sym->maxval;
     }
     else if (ident == Id::min)
     {
-        if (!sym->minval)
+        if (!sym->isdone)
             goto Lfwd;
+        if (!sym->minval)
+        {
+            error(loc, "enum %s has no .min property because the base type %s is not an integral type", toChars(), sym->memtype->toChars());
+            return new ErrorExp;
+        }
         e = sym->minval;
     }
     else if (ident == Id::init)

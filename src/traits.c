@@ -52,9 +52,13 @@ struct Ptrait
     Identifier *ident;          // which trait we're looking for
 };
 
-static int fptraits(void *param, FuncDeclaration *f)
-{   Ptrait *p = (Ptrait *)param;
+static int fptraits(void *param, Dsymbol *s)
+{
+    FuncDeclaration *f = s->isFuncDeclaration();
+    if (!f)
+        return 0;
 
+    Ptrait *p = (Ptrait *)param;
     if (p->ident == Id::getVirtualFunctions && !f->isVirtual())
         return 0;
 
@@ -87,12 +91,12 @@ static int fptraits(void *param, FuncDeclaration *f)
  *      unitTests           array of DsymbolExp's of the collected unit test functions
  *      uniqueUnitTests     updated with symbols from unitTests[ ]
  */
-static void collectUnitTests (const Dsymbols* const symbols, AA* uniqueUnitTests, Expressions* const unitTests)
+static void collectUnitTests (Dsymbols *symbols, AA *uniqueUnitTests, Expressions *unitTests)
 {
     for (size_t i = 0; i < symbols->dim; i++)
     {
-        Dsymbol* const symbol = (*symbols)[i];
-        UnitTestDeclaration* const unitTest = symbol->unittest ? symbol->unittest : symbol->isUnitTestDeclaration();
+        Dsymbol *symbol = (*symbols)[i];
+        UnitTestDeclaration *unitTest = symbol->unittest ? symbol->unittest : symbol->isUnitTestDeclaration();
 
         if (unitTest)
         {
@@ -109,7 +113,7 @@ static void collectUnitTests (const Dsymbols* const symbols, AA* uniqueUnitTests
 
         else
         {
-            const AttribDeclaration* const attrDecl = symbol->isAttribDeclaration();
+            AttribDeclaration *attrDecl = symbol->isAttribDeclaration();
 
             if (attrDecl)
                 collectUnitTests(attrDecl->decl, uniqueUnitTests, unitTests);
@@ -262,7 +266,7 @@ Expression *TraitsExp::semantic(Scope *sc)
     else if (ident == Id::isFinalFunction)
     {
         FuncDeclaration *f;
-        ISDSYMBOL((f = s->isFuncDeclaration()) != NULL && f->isFinal())
+        ISDSYMBOL((f = s->isFuncDeclaration()) != NULL && f->isFinalFunc())
     }
 #if DMDV2
     else if (ident == Id::isStaticFunction)
@@ -463,7 +467,7 @@ Expression *TraitsExp::semantic(Scope *sc)
             p.exps = exps;
             p.e1 = e;
             p.ident = ident;
-            overloadApply(f, &fptraits, &p);
+            overloadApply(f, &p, &fptraits);
 
             TupleExp *tup = new TupleExp(loc, exps);
             return tup->semantic(sc);

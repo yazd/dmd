@@ -356,16 +356,10 @@ Expression *resolvePropertiesX(Scope *sc, Expression *e1, Expression *e2 = NULL)
             goto Leprop;
         tiargs = dti->ti->tiargs;
         tthis  = dti->e1->type;
-        if (dti->ti->tempovers)
-        {
-            os = dti->ti->tempovers;
+        if ((os = dti->ti->tempdecl->isOverloadSet()) != NULL)
             goto Los;
-        }
-        if (dti->ti->tempdecl)
-        {
-            s = dti->ti->tempdecl;
+        if ((s = dti->ti->tempdecl) != NULL)
             goto Lfd;
-        }
     }
     else if (e1->op == TOKdottd)
     {
@@ -385,23 +379,17 @@ Expression *resolvePropertiesX(Scope *sc, Expression *e1, Expression *e2 = NULL)
             goto Lfd;
         }
         TemplateInstance *ti = s->isTemplateInstance();
-        if (ti && !ti->semanticRun)
+        if (ti && !ti->semanticRun && ti->tempdecl)
         {
             //assert(ti->needsTypeInference(sc));
             if (!ti->semanticTiargs(sc))
                 goto Leprop;
             tiargs = ti->tiargs;
             tthis  = NULL;
-            if (ti->tempovers)
-            {
-                os = ti->tempovers;
+            if ((os = ti->tempdecl->isOverloadSet()) != NULL)
                 goto Los;
-            }
-            if (ti->tempdecl)
-            {
-                s = ti->tempdecl;
+            if ((s = ti->tempdecl) != NULL)
                 goto Lfd;
-            }
         }
     }
     else if (e1->op == TOKtemplate)
@@ -501,7 +489,6 @@ Expression *resolvePropertiesX(Scope *sc, Expression *e1, Expression *e2 = NULL)
         }
     }
 
-return_expr:
     if (!e1->type)
     {
         error(loc, "cannot resolve type for %s", e1->toChars());
@@ -612,8 +599,7 @@ Expression *resolvePropertiesOnly(Scope *sc, Expression *e1)
     else if (e1->op == TOKdotti)
     {
         DotTemplateInstanceExp* dti = (DotTemplateInstanceExp *)e1;
-        td = dti->ti->tempdecl;
-        if (td)
+        if (dti->ti->tempdecl && (td = dti->ti->tempdecl->isTemplateDeclaration()) != NULL)
             goto Ltd;
     }
     else if (e1->op == TOKdottd)
@@ -628,10 +614,9 @@ Expression *resolvePropertiesOnly(Scope *sc, Expression *e1)
         if (td)
             goto Ltd;
         TemplateInstance *ti = s->isTemplateInstance();
-        if (ti && !ti->semanticRun)
+        if (ti && !ti->semanticRun && ti->tempdecl)
         {
-            td = ti->tempdecl;
-            if (td)
+            if ((td = ti->tempdecl->isTemplateDeclaration()) != NULL)
                 goto Ltd;
         }
     }
@@ -707,12 +692,12 @@ Expression *searchUFCS(Scope *sc, UnaExp *ue, Identifier *ident)
     FuncDeclaration *f = s->isFuncDeclaration();
     if (f)
     {
-        TemplateDeclaration *tempdecl = getFuncTemplateDecl(f);
-        if (tempdecl)
+        TemplateDeclaration *td = getFuncTemplateDecl(f);
+        if (td)
         {
-            if (tempdecl->overroot)
-                tempdecl = tempdecl->overroot;
-            s = tempdecl;
+            if (td->overroot)
+                td = td->overroot;
+            s = td;
         }
     }
 
@@ -1227,16 +1212,19 @@ TemplateDeclaration *getFuncTemplateDecl(Dsymbol *s)
 {
     FuncDeclaration *f = s->isFuncDeclaration();
     if (f && f->parent)
-    {   TemplateInstance *ti = f->parent->isTemplateInstance();
-
+    {
+        TemplateInstance *ti = f->parent->isTemplateInstance();
+        TemplateDeclaration *td;
         if (ti &&
             !ti->isTemplateMixin() &&
             (ti->name == f->ident ||
              ti->toAlias()->ident == f->ident)
             &&
-            ti->tempdecl && ti->tempdecl->onemember)
+            ti->tempdecl &&
+            (td = ti->tempdecl->isTemplateDeclaration()) != NULL &&
+            td->onemember)
         {
-            return ti->tempdecl;
+            return td;
         }
     }
     return NULL;
@@ -2092,7 +2080,7 @@ real_t Expression::toImaginary()
 complex_t Expression::toComplex()
 {
     error("Floating point constant expression expected instead of %s", toChars());
-    return 0.0;
+    return (complex_t)0.0;
 }
 
 StringExp *Expression::toString()
@@ -2757,7 +2745,7 @@ real_t IntegerExp::toImaginary()
 
 complex_t IntegerExp::toComplex()
 {
-    return toReal();
+    return (complex_t)toReal();
 }
 
 int IntegerExp::isBool(int result)
@@ -3336,12 +3324,13 @@ Expression *IdentifierExp::semantic(Scope *sc)
              */
             FuncDeclaration *f = s->isFuncDeclaration();
             if (f)
-            {   TemplateDeclaration *tempdecl = getFuncTemplateDecl(f);
-                if (tempdecl)
+            {
+                TemplateDeclaration *td = getFuncTemplateDecl(f);
+                if (td)
                 {
-                    if (tempdecl->overroot)         // if not start of overloaded list of TemplateDeclaration's
-                        tempdecl = tempdecl->overroot; // then get the start
-                    e = new TemplateExp(loc, tempdecl, f);
+                    if (td->overroot)       // if not start of overloaded list of TemplateDeclaration's
+                        td = td->overroot;  // then get the start
+                    e = new TemplateExp(loc, td, f);
                     e = e->semantic(sc);
                     return e;
                 }
@@ -3922,7 +3911,7 @@ StringExp::StringExp(Loc loc, void *string, size_t len)
     this->ownedByCtfe = false;
 }
 
-StringExp::StringExp(Loc loc, void *string, size_t len, unsigned char postfix)
+StringExp::StringExp(Loc loc, void *string, size_t len, utf8_t postfix)
         : Expression(loc, TOKstring, sizeof(StringExp))
 {
     this->string = string;
@@ -3972,7 +3961,7 @@ Expression *StringExp::semantic(Scope *sc)
             case 'd':
                 for (u = 0; u < len;)
                 {
-                    p = utf_decodeChar((unsigned char *)string, len, &u, &c);
+                    p = utf_decodeChar((utf8_t *)string, len, &u, &c);
                     if (p)
                     {   error("%s", p);
                         return new ErrorExp();
@@ -3994,7 +3983,7 @@ Expression *StringExp::semantic(Scope *sc)
             case 'w':
                 for (u = 0; u < len;)
                 {
-                    p = utf_decodeChar((unsigned char *)string, len, &u, &c);
+                    p = utf_decodeChar((utf8_t *)string, len, &u, &c);
                     if (p)
                     {   error("%s", p);
                         return new ErrorExp();
@@ -4044,7 +4033,7 @@ size_t StringExp::length()
         case 1:
             for (size_t u = 0; u < len;)
             {
-                p = utf_decodeChar((unsigned char *)string, len, &u, &c);
+                p = utf_decodeChar((utf8_t *)string, len, &u, &c);
                 if (p)
                 {   error("%s", p);
                     return 0;
@@ -4190,7 +4179,7 @@ unsigned StringExp::charAt(size_t i)
     switch (sz)
     {
         case 1:
-            value = ((unsigned char *)string)[i];
+            value = ((utf8_t *)string)[i];
             break;
 
         case 2:
@@ -4249,7 +4238,7 @@ void StringExp::toMangleBuffer(OutBuffer *buf)
     const char *p;
     unsigned c;
     size_t u;
-    unsigned char *q;
+    utf8_t *q;
     size_t qlen;
 
     /* Write string in UTF-8 format
@@ -4257,7 +4246,7 @@ void StringExp::toMangleBuffer(OutBuffer *buf)
     switch (sz)
     {   case 1:
             m = 'a';
-            q = (unsigned char *)string;
+            q = (utf8_t *)string;
             qlen = len;
             break;
         case 2:
@@ -4293,12 +4282,12 @@ void StringExp::toMangleBuffer(OutBuffer *buf)
     buf->writeByte(m);
     buf->printf("%d_", (int)qlen); // nbytes <= 11
 
-    for (unsigned char *p = buf->data + buf->offset, *pend = p + 2 * qlen;
+    for (utf8_t *p = buf->data + buf->offset, *pend = p + 2 * qlen;
          p < pend; p += 2, ++q)
     {
-        unsigned char hi = *q >> 4 & 0xF;
+        utf8_t hi = *q >> 4 & 0xF;
         p[0] = (hi < 10 ? hi + '0' : hi - 10 + 'a');
-        unsigned char lo = *q & 0xF;
+        utf8_t lo = *q & 0xF;
         p[1] = (lo < 10 ? lo + '0' : lo - 10 + 'a');
     }
     buf->offset += 2 * qlen;
@@ -4920,7 +4909,7 @@ Lagain:
         unsigned olderrs = global.errors;
         if (ti->needsTypeInference(sc))
         {
-            if (TemplateDeclaration *td = ti->tempdecl)
+            if (TemplateDeclaration *td = ti->tempdecl->isTemplateDeclaration())
             {
                 Dsymbol *p = td->toParent2();
                 FuncDeclaration *fdthis = hasThis(sc);
@@ -4932,7 +4921,7 @@ Lagain:
                     return e->semantic(sc);
                 }
             }
-            else if (OverloadSet *os = ti->tempovers)
+            else if (OverloadSet *os = ti->tempdecl->isOverloadSet())
             {
                 FuncDeclaration *fdthis = hasThis(sc);
                 AggregateDeclaration *ad = os->parent->isAggregateDeclaration();
@@ -5925,7 +5914,6 @@ FuncLiteralDeclaration *getFuncLit(Dsymbols *members);
 
 Expression *FuncExp::syntaxCopy()
 {
-    FuncExp *fe;
     TemplateDeclaration *td2;
     FuncLiteralDeclaration *fd2;
     if (td)
@@ -6169,7 +6157,7 @@ Expression *DeclarationExp::semantic(Scope *sc)
             return new ErrorExp();
         }
         else if (sc->func)
-        {   VarDeclaration *v = s->isVarDeclaration();
+        {
             if ( (s->isFuncDeclaration() || s->isTypedefDeclaration() ||
                 s->isAggregateDeclaration() || s->isEnumDeclaration() ||
                 s->isInterfaceDeclaration()) &&
@@ -7141,7 +7129,7 @@ Expression *CompileExp::semantic(Scope *sc)
         return new ErrorExp();
     }
     se = se->toUTF8(sc);
-    Parser p(sc->module, (unsigned char *)se->string, se->len, 0);
+    Parser p(sc->module, (utf8_t *)se->string, se->len, 0);
     p.loc = loc;
     p.nextToken();
     //printf("p.loc.linnum = %d\n", p.loc.linnum);
@@ -7449,26 +7437,15 @@ Expression *DotIdExp::semanticY(Scope *sc, int flag)
     {
         if (AggregateDeclaration *ad = sc->getStructClassScope())
         {
-            if (ClassDeclaration *cd = ad->isClassDeclaration())
+            if (e1->op == TOKthis)
             {
-                if (e1->op == TOKthis)
-                {
-                    DotIdExp *die = typeDotIdExp(loc, cd->type, ident);
-                    return die->semanticY(sc, flag);
-                }
-                else if (cd->baseClass && e1->op == TOKsuper)
-                {
-                    DotIdExp *die = typeDotIdExp(loc, cd->baseClass->type, ident);
-                    return die->semanticY(sc, flag);
-                }
+                e1 = new TypeExp(e1->loc, ad->type);
             }
-            else if (StructDeclaration *sd = ad->isStructDeclaration())
+            else
             {
-                if (e1->op == TOKthis)
-                {
-                    DotIdExp *die = typeDotIdExp(loc, sd->type, ident);
-                    return die->semanticY(sc, flag);
-                }
+                ClassDeclaration *cd = ad->isClassDeclaration();
+                if (cd && cd->baseClass)
+                    e1 = new TypeExp(e1->loc, cd->baseClass->type);
             }
         }
     }
@@ -7663,7 +7640,7 @@ Expression *DotIdExp::semanticY(Scope *sc, int flag)
     }
     else
     {
-        if (e1->op == TOKtemplate)
+        if (e1->op == TOKtype || e1->op == TOKtemplate)
             flag = 0;
         e = e1->type->dotExp(sc, e1, ident, flag);
         if (!flag || e)
@@ -7808,9 +7785,7 @@ Expression *DotVarExp::semantic(Scope *sc)
             accessCheck(loc, sc, e1, var);
 
             VarDeclaration *v = var->isVarDeclaration();
-#if PULL93
-            if (v && (v->isDataseg() || (v->storage_class & STCmanifest)))
-#endif
+            if (!PULL93 || v && (v->isDataseg() || (v->storage_class & STCmanifest)))
             {
                 Expression *e = expandVar(WANTvalue, v);
                 if (e)
@@ -7952,7 +7927,7 @@ bool DotTemplateInstanceExp::findTempDecl(Scope *sc)
 #if LOGSEMANTIC
     printf("DotTemplateInstanceExp::findTempDecl('%s')\n", toChars());
 #endif
-    if (ti->tempdecl || ti->tempovers)
+    if (ti->tempdecl)
         return true;
 
     Expression *e = new DotIdExp(loc, e1, ti->name);
@@ -8177,8 +8152,7 @@ L1:
     else if (e->op == TOKoverloadset)
     {
         OverExp *oe = (OverExp *)e;
-        ti->tempdecl = NULL;
-        ti->tempovers = oe->vars;
+        ti->tempdecl = oe->vars;
         e = new ScopeExp(loc, ti);
         e = e->semantic(sc);
         return e;
@@ -8379,11 +8353,11 @@ Expression *CallExp::semantic(Scope *sc)
                  */
                 tiargs = ti->tiargs;
                 tierror = ti;                   // for error reporting
-                assert(!!ti->tempdecl != !!ti->tempovers);
-                if (ti->tempdecl)
-                    e1 = new TemplateExp(loc, ti->tempdecl);
+                assert(ti->tempdecl);
+                if (TemplateDeclaration *td = ti->tempdecl->isTemplateDeclaration())
+                    e1 = new TemplateExp(loc, td);
                 else
-                    e1 = new OverExp(loc, ti->tempovers);
+                    e1 = new OverExp(loc, ti->tempdecl->isOverloadSet());
             }
             else
             {
@@ -8413,10 +8387,11 @@ Ldotti:
                  */
                 tiargs = ti->tiargs;
                 tierror = ti;                   // for error reporting
-                if (ti->tempdecl)
-                    e1 = new DotTemplateExp(loc, se->e1, ti->tempdecl);
+                assert(ti->tempdecl);
+                if (TemplateDeclaration *td = ti->tempdecl->isTemplateDeclaration())
+                    e1 = new DotTemplateExp(loc, se->e1, td);
                 else
-                    e1 = new DotExp(loc, se->e1, new OverExp(loc, ti->tempovers));
+                    e1 = new DotExp(loc, se->e1, new OverExp(loc, ti->tempdecl->isOverloadSet()));
             }
             else
             {
@@ -9163,7 +9138,6 @@ Expression *CallExp::addDtorHook(Scope *sc)
             return e;
         }
     }
-Lnone:
     return this;
 }
 
@@ -9199,7 +9173,6 @@ Expression *AddrExp::semantic(Scope *sc)
     if (!type)
     {
         UnaExp::semantic(sc);
-        Expression *olde1 = e1;
         if (e1->type == Type::terror)
             return new ErrorExp();
         int wasCond = e1->op == TOKquestion;
@@ -9908,7 +9881,10 @@ Expression *CastExp::semantic(Scope *sc)
         {
             Type* tobn = tob->nextOf()->toBasetype();
             Type* t1bn = t1b->nextOf()->toBasetype();
-            if (!tobn->hasPointers() &&
+            // If the struct is opaque we don't know about the struct members and the cast becomes unsafe
+            bool sfwrd = tobn->ty == Tstruct && !((StructDeclaration *)((TypeStruct *)tobn)->sym)->members ||
+                    t1bn->ty == Tstruct && !((StructDeclaration *)((TypeStruct *)t1bn)->sym)->members;
+            if (!sfwrd && !tobn->hasPointers() &&
                 tobn->ty != Tfunction && t1bn->ty != Tfunction &&
                 tobn->size() <= t1bn->size() &&
                 MODimplicitConv(t1bn->mod, tobn->mod))
@@ -10662,7 +10638,7 @@ Expression *IndexExp::semantic(Scope *sc)
             e2 = e2->optimize(WANTvalue);
             if (e2->op == TOKint64 && e2->toInteger() == 0)
                 ;
-            else if (sc->func->setUnsafe())
+            else if (sc->func && sc->func->setUnsafe())
             {
                 error("safe function '%s' cannot index pointer '%s'",
                     sc->func->toPrettyChars(), e1->toChars());
@@ -10763,7 +10739,7 @@ Expression *IndexExp::semantic(Scope *sc)
             e2 = e2->optimize(WANTvalue);
             dinteger_t length = el->toInteger();
             if (length)
-                skipboundscheck = IntRange(0, length).contains(e2->getIntRange());
+                skipboundscheck = IntRange(SignExtendedNumber(0), SignExtendedNumber(length)).contains(e2->getIntRange());
         }
     }
 
@@ -10985,7 +10961,6 @@ Expression *AssignExp::semantic(Scope *sc)
     {
         ArrayExp *ae = (ArrayExp *)e1;
         AggregateDeclaration *ad = NULL;
-        Identifier *id = Id::index;
 
         ae->e1 = ae->e1->semantic(sc);
         ae->e1 = resolveProperties(sc, ae->e1);
@@ -11043,7 +11018,6 @@ Expression *AssignExp::semantic(Scope *sc)
     {
         SliceExp *ae = (SliceExp *)e1;
         AggregateDeclaration *ad = NULL;
-        Identifier *id = Id::index;
 
         ae->e1 = ae->e1->semantic(sc);
         ae->e1 = resolveProperties(sc, ae->e1);
@@ -12898,9 +12872,6 @@ Expression *CmpExp::semantic(Scope *sc)
         incompatibleTypes();
         return new ErrorExp();
     }
-
-    Expression *eb1 = e1;
-    Expression *eb2 = e2;
 
     e = typeCombine(sc);
     if (e->op == TOKerror)

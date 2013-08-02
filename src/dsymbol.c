@@ -429,7 +429,7 @@ Dsymbol *Dsymbol::search_correct(Identifier *ident)
     if (global.gag)
         return NULL;            // don't do it for speculative compiles; too time consuming
 
-    return (Dsymbol *)speller(ident->toChars(), &symbol_search_fp, this, idchars);
+    return (Dsymbol *)speller(ident->toChars(), &symbol_search_fp, (void *)this, idchars);
 }
 
 /***************************************
@@ -796,7 +796,7 @@ Dsymbols *Dsymbol::arraySyntaxCopy(Dsymbols *a)
  * Ignore NULL comments.
  */
 
-void Dsymbol::addComment(unsigned char *comment)
+void Dsymbol::addComment(utf8_t *comment)
 {
     //if (comment)
         //printf("adding comment '%s' to symbol %p '%s'\n", comment, this, toChars());
@@ -1253,7 +1253,23 @@ WithScopeSymbol::WithScopeSymbol(WithStatement *withstate)
 Dsymbol *WithScopeSymbol::search(Loc loc, Identifier *ident, int flags)
 {
     // Acts as proxy to the with class declaration
-    return withstate->exp->type->toDsymbol(NULL)->search(loc, ident, 0);
+    Dsymbol *s = NULL;
+    Expression *eold = NULL;
+    for (Expression *e = withstate->exp; e != eold; e = resolveAliasThis(scope, e))
+    {
+        if (e->type->ty == Taarray)
+            s = ((TypeAArray *)e->type)->getImpl();
+        else
+            s = e->type->toDsymbol(NULL);
+        if (s)
+        {
+            s = s->search(loc, ident, 0);
+            if (s)
+                return s;
+        }
+        eold = e;
+    }
+    return NULL;
 }
 
 /****************************** ArrayScopeSymbol ******************************/
