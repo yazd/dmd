@@ -4697,49 +4697,6 @@ void test7422() {
 
 /***************************************************/
 
-void test7504() pure nothrow @safe
-{
-    auto n = null;
-    char[] k = n;
-    assert(k.ptr == null);
-    assert(k.length == 0);
-
-    double[] l;
-    l = n;
-    assert(l.ptr == null);
-    assert(l.length == 0);
-
-    immutable(int[]) m = n;
-    assert(m.ptr == null);
-    assert(m.length == 0);
-
-    const(float)[] o;
-    o = n;
-    assert(o.ptr == null);
-    assert(o.length == 0);
-
-    auto c = create7504(null, null);
-    assert(c.k.ptr == null);
-    assert(c.k.length == 0);
-    assert(c.l.ptr == null);
-    assert(c.l.length == 0);
-}
-
-class C7504
-{
-    int[] k;
-    string l;
-}
-
-C7504 create7504(T...)(T input)
-{
-    auto obj = new C7504;
-    obj.tupleof = input;
-    return obj;
-}
-
-/***************************************************/
-
 struct S7502
 {
     int[0x1000] arr;
@@ -5821,6 +5778,16 @@ void test10642()
 
 /***************************************************/
 
+void test7436()
+{
+    ubyte a = 10;
+    float f = 6;
+    ubyte b = a += f;
+    assert(b == 16);
+}
+
+/***************************************************/
+
 int main()
 {
     test1();
@@ -6066,7 +6033,6 @@ int main()
     test6504();
     test7422();
     test7424();
-    test7504();
     test7502();
     test4820();
     test4820_2();
@@ -6109,6 +6075,7 @@ int main()
     test10628();
     test10633();
     test10642();
+    test7436();
 
     writefln("Success");
     return 0;

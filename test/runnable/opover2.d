@@ -1208,6 +1208,35 @@ void test10064()
 }
 
 /**************************************/
+// 10394
+
+void test10394()
+{
+    alias Seq!(int, int) Pair;
+    Pair pair;
+
+    struct S1
+    {
+        int opBinary(string op)(Pair) { return 1;  }
+        bool opEquals(Pair) { return true; }
+        int opOpAssign(string op)(Pair) { return 1; }
+    }
+    S1 s1;
+    assert((s1 + pair) == 1);
+    assert((s1 == pair) == true);
+    assert((s1 *= pair) == 1);
+
+    struct S2
+    {
+        int opBinaryRight(string op)(Pair lhs) { return 1;  }
+        int opCmp(Pair) { return -1; }
+    }
+    S2 s2;
+    assert((pair in s2) == 1);
+    assert(s2 < pair);
+}
+
+/**************************************/
 // 10597
 
 struct R10597
@@ -1365,6 +1394,50 @@ void test10567()
 }
 
 /**************************************/
+// 11062
+
+struct S11062ia
+{
+    struct S1
+    {
+        void opIndexAssign(int val, int key) {}
+    }
+    struct S2
+    {
+        S1 headers;
+    }
+
+    private S2 m_obj;
+    @property S2 get() { return m_obj; }
+    alias get this;
+}
+
+struct S11062sa
+{
+    struct S1
+    {
+        void opSliceAssign(int val, int lwr, int upr) {}
+    }
+    struct S2
+    {
+        S1 headers;
+    }
+
+    private S2 m_obj;
+    @property S2 get() { return m_obj; }
+    alias get this;
+}
+
+void test11062()
+{
+    auto sia = S11062ia();
+    sia.headers[1] = 1;     // bug
+
+    auto ssa = S11062sa();
+    ssa.headers[1..2] = 1;  // bug
+}
+
+/**************************************/
 
 int main()
 {
@@ -1397,7 +1470,9 @@ int main()
     test9689();
     test9694();
     test10064();
+    test10394();
     test10567();
+    test11062();
 
     printf("Success\n");
     return 0;

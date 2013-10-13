@@ -2,6 +2,7 @@
 
 import std.stdio;
 import std.math;
+import core.stdc.stdio;
 
 /***************************************/
 
@@ -342,6 +343,25 @@ void test10677()
 
 /***************************************/
 
+void test7806()
+{
+    for (idouble i = -2i; i <= 2i; i += .125i)
+        for (double r = -2; r <= 2; r += .0625)
+        {
+            cdouble c = r + i;
+            printf("%g %gi\n", c.re, c.im);
+        }
+}
+
+/***************************************/
+
+void test7976() {
+    creal[] a = new creal[2];
+    auto b = a[0] = a[1];
+}
+
+/***************************************/
+
 int main(char[][] args)
 {
 
@@ -365,6 +385,8 @@ int main(char[][] args)
     test7591();
     test8966();
     test10677();
+    test7806();
+    test7976();
 
     printf("Success!\n");
     return 0;

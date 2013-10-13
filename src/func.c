@@ -1,5 +1,5 @@
 // Compiler implementation of the D programming language
-// Copyright (c) 1999-2012 by Digital Mars
+// Copyright (c) 1999-2013 by Digital Mars
 // All Rights Reserved
 // written by Walter Bright
 // http://www.digitalmars.com
@@ -25,8 +25,10 @@
 #include "template.h"
 #include "hdrgen.h"
 #include "target.h"
+#include "parse.h"
 
 void functionToCBuffer2(TypeFunction *t, OutBuffer *buf, HdrGenState *hgs, int mod, const char *kind);
+void genCmain(Scope *sc);
 
 /********************************* FuncDeclaration ****************************/
 
@@ -72,7 +74,6 @@ FuncDeclaration::FuncDeclaration(Loc loc, Loc endloc, Identifier *id, StorageCla
     ctfeCode = NULL;
     isArrayOp = 0;
     dArrayOp = NULL;
-    semanticRun = PASSinit;
     semantic3Errors = 0;
 #if DMDV1
     nestedFrameRef = 0;
@@ -442,18 +443,32 @@ void FuncDeclaration::semantic(Scope *sc)
         if (type->nextOf() == Type::terror)
             goto Ldone;
 
-        if (cd->baseClass)
+        bool may_override = false;
+        for (size_t i = 0; i < cd->baseclasses->dim; i++)
         {
-            Dsymbol *cbd = cd->baseClass;
-            if (cbd->parent && cbd->parent->isTemplateInstance())
+            BaseClass *b = (*cd->baseclasses)[i];
+            ClassDeclaration *cbd = b->type->toBasetype()->isClassHandle();
+            if (!cbd)
+                continue;
+            for (size_t j = 0; j < cbd->vtbl.dim; j++)
             {
-                for (size_t i = 0; i < cd->baseClass->vtbl.dim; i++)
+                FuncDeclaration *f = cbd->vtbl[j]->isFuncDeclaration();
+                if (!f || f->ident != ident)
+                    continue;
+                if (cbd->parent && cbd->parent->isTemplateInstance())
                 {
-                    FuncDeclaration *f = cd->baseClass->vtbl[i]->isFuncDeclaration();
-                    if (f && f->ident == ident && !f->functionSemantic())
+                    if (!f->functionSemantic())
                         goto Ldone;
                 }
+                may_override = true;
             }
+        }
+        if (may_override && type->nextOf() == NULL)
+        {
+            /* If same name function exists in base class but 'this' is auto return,
+             * cannot find index of base class's vtbl[] to override.
+             */
+            error("return type inference is not supported if may override base class function");
         }
 
         /* Find index of existing function in base class's vtbl[] to override
@@ -667,7 +682,7 @@ void FuncDeclaration::semantic(Scope *sc)
             }
         }
 
-        if (!doesoverride && isOverride())
+        if (!doesoverride && isOverride() && type->nextOf())
         {
             Dsymbol *s = NULL;
             for (size_t i = 0; i < cd->baseclasses->dim; i++)
@@ -708,6 +723,10 @@ void FuncDeclaration::semantic(Scope *sc)
     }
     else if (isOverride() && !parent->isTemplateInstance())
         error("override only applies to class member functions");
+
+    // Reflect this->type to f because it could be changed by findVtblIndex
+    assert(type->ty == Tfunction);
+    f = (TypeFunction *)type;
 
     /* Do not allow template instances to add virtual functions
      * to a class.
@@ -776,13 +795,17 @@ void FuncDeclaration::semantic(Scope *sc)
          * can call them.
          */
         if (frequire)
-        {   /*   in { ... }
+        {
+            /*   in { ... }
              * becomes:
              *   void __require() { ... }
              *   __require();
              */
             Loc loc = frequire->loc;
             TypeFunction *tf = new TypeFunction(NULL, Type::tvoid, 0, LINKd);
+            tf->isnothrow = f->isnothrow;
+            tf->purity = f->purity;
+            tf->trust = f->trust;
             FuncDeclaration *fd = new FuncDeclaration(loc, loc,
                 Id::require, STCundefined, tf);
             fd->fbody = frequire;
@@ -797,9 +820,10 @@ void FuncDeclaration::semantic(Scope *sc)
             outId = Id::result; // provide a default
 
         if (fensure)
-        {   /*   out (result) { ... }
+        {
+            /*   out (result) { ... }
              * becomes:
-             *   tret __ensure(ref tret result) { ... }
+             *   void __ensure(ref tret result) { ... }
              *   __ensure(result);
              */
             Loc loc = fensure->loc;
@@ -810,6 +834,9 @@ void FuncDeclaration::semantic(Scope *sc)
                 arguments->push(a);
             }
             TypeFunction *tf = new TypeFunction(arguments, Type::tvoid, 0, LINKd);
+            tf->isnothrow = f->isnothrow;
+            tf->purity = f->purity;
+            tf->trust = f->trust;
             FuncDeclaration *fd = new FuncDeclaration(loc, loc,
                 Id::ensure, STCundefined, tf);
             fd->fbody = fensure;
@@ -867,6 +894,9 @@ Ldone:
             printf("entry     %-10s\t%s\n", type, name);
         }
     }
+
+    if (fbody && isMain() && sc->module->isRoot())
+        genCmain(sc);
 
     return;
 }
@@ -1252,26 +1282,31 @@ void FuncDeclaration::semantic3(Scope *sc)
                 fbody = new CompoundStatement(Loc(), new Statements());
 
             if (inferRetType)
-            {   // If no return type inferred yet, then infer a void
+            {
+                // If no return type inferred yet, then infer a void
                 if (!type->nextOf())
                 {
                     f->next = Type::tvoid;
                     //type = type->semantic(loc, sc);   // Removed with 6902
                 }
-                else if (returns && f->next->ty != Tvoid)
-                {
-                    for (size_t i = 0; i < returns->dim; i++)
-                    {   Expression *exp = (*returns)[i]->exp;
-                        if (!f->next->immutableOf()->equals(exp->type->immutableOf()))
-                        {   exp = exp->castTo(sc2, f->next);
-                            exp = exp->optimize(WANTvalue);
-                            (*returns)[i]->exp = exp;
-                        }
-                        //printf("[%d] %s %s\n", i, exp->type->toChars(), exp->toChars());
-                    }
-                }
-                assert(type == f);
             }
+            if (returns && f->next->ty != Tvoid)
+            {
+                for (size_t i = 0; i < returns->dim; i++)
+                {
+                    Expression *exp = (*returns)[i]->exp;
+                    if (!nrvo_can && !f->isref && exp->isLvalue())
+                        exp = callCpCtor(sc2, exp);
+                    if (!tintro && !f->next->immutableOf()->equals(exp->type->immutableOf()))
+                    {
+                        exp = exp->castTo(sc2, f->next);
+                        exp = exp->optimize(WANTvalue);
+                    }
+                    //printf("[%d] %s %s\n", i, exp->type->toChars(), exp->toChars());
+                    (*returns)[i]->exp = exp;
+                }
+            }
+            assert(type == f);
 
             if (isStaticCtorDeclaration())
             {   /* It's a static constructor. Ensure that all
@@ -2294,9 +2329,6 @@ int FuncDeclaration::findVtblIndex(Dsymbols *vtbl, int dim)
             type = type->addStorageClass(mismatchstc);
             bestvi = mismatchvi;
         }
-        else
-            error("of type %s overrides but is not covariant with %s of type %s",
-                type->toChars(), mismatch->toPrettyChars(), mismatch->type->toChars());
     }
     return bestvi;
 }
@@ -2900,7 +2932,8 @@ int FuncDeclaration::getLevel(Loc loc, Scope *sc, FuncDeclaration *fd)
         //printf("\ts = %s, '%s'\n", s->kind(), s->toChars());
         FuncDeclaration *thisfd = s->isFuncDeclaration();
         if (thisfd)
-        {   if (!thisfd->isNested() && !thisfd->vthis && !sc->intypeof)
+        {
+            if (!thisfd->isNested() && !thisfd->vthis && !sc->intypeof)
                 goto Lerr;
         }
         else
@@ -2934,7 +2967,11 @@ int FuncDeclaration::getLevel(Loc loc, Scope *sc, FuncDeclaration *fd)
 Lerr:
     // Don't give error if in template constraint
     if (!((sc->flags & SCOPEstaticif) && parent->isTemplateDeclaration()))
-        error(loc, "cannot access frame of function %s", fd->toPrettyChars());
+    {
+        // better diagnostics for static functions
+        ::error(loc, "%s%s %s cannot access frame of function %s",
+            isStatic() ? "static " : "", kind(), toPrettyChars(), fd->toPrettyChars());
+    }
     return 1;
 }
 
@@ -3200,12 +3237,7 @@ bool FuncDeclaration::setUnsafe()
 
 Type *getIndirection(Type *t)
 {
-    t = t->toBasetype();
-
-    if (t->ty == Tsarray)
-    {   while (t->ty == Tsarray)
-            t = t->nextOf()->toBasetype();
-    }
+    t = t->baseElemOf();
     if (t->ty == Tarray || t->ty == Tpointer)
         return t->nextOf()->toBasetype();
     if (t->ty == Taarray || t->ty == Tclass)
@@ -3256,10 +3288,7 @@ int traverseIndirections(Type *ta, Type *tb, void *p = NULL, bool a2b = true)
     if (tbb != tb)
         return traverseIndirections(ta, tbb, ctxt, a2b);
 
-    if (tb->ty == Tsarray)
-    {   while (tb->toBasetype()->ty == Tsarray)
-            tb = tb->toBasetype()->nextOf();
-    }
+    tb = tb->baseElemOf();
     if (tb->ty == Tclass || tb->ty == Tstruct)
     {
         for (Ctxt *c = ctxt; c; c = c->prev)
@@ -3381,7 +3410,8 @@ bool FuncDeclaration::needThis()
 bool FuncDeclaration::addPreInvariant()
 {
     AggregateDeclaration *ad = isThis();
-    return (ad &&
+    ClassDeclaration *cd = ad ? ad->isClassDeclaration() : NULL;
+    return (ad && !(cd && cd->isCPPclass()) &&
             //ad->isClassDeclaration() &&
             global.params.useInvariants &&
             (protection == PROTprotected || protection == PROTpublic || protection == PROTexport) &&
@@ -3392,7 +3422,8 @@ bool FuncDeclaration::addPreInvariant()
 bool FuncDeclaration::addPostInvariant()
 {
     AggregateDeclaration *ad = isThis();
-    return (ad &&
+    ClassDeclaration *cd = ad ? ad->isClassDeclaration() : NULL;
+    return (ad && !(cd && cd->isCPPclass()) &&
             ad->inv &&
             //ad->isClassDeclaration() &&
             global.params.useInvariants &&
@@ -3761,16 +3792,7 @@ FuncLiteralDeclaration::FuncLiteralDeclaration(Loc loc, Loc endloc, Type *type,
         TOK tok, ForeachStatement *fes, Identifier *id)
     : FuncDeclaration(loc, endloc, NULL, STCundefined, type)
 {
-    if (!id)
-    {
-        const char *s;
-        if (fes)                        s = "__foreachbody";
-        else if (tok == TOKreserved)    s = "__lambda";
-        else if (tok == TOKdelegate)    s = "__dgliteral";
-        else                            s = "__funcliteral";
-        id = Lexer::uniqueId(s);
-    }
-    this->ident = id;
+    this->ident = id ? id : Id::empty;
     this->tok = tok;
     this->fes = fes;
     this->treq = NULL;
@@ -3779,21 +3801,13 @@ FuncLiteralDeclaration::FuncLiteralDeclaration(Loc loc, Loc endloc, Type *type,
 
 Dsymbol *FuncLiteralDeclaration::syntaxCopy(Dsymbol *s)
 {
-    return syntaxCopy(s, false);
-}
-
-Dsymbol *FuncLiteralDeclaration::syntaxCopy(Dsymbol *s, bool keepId)
-{
     FuncLiteralDeclaration *f;
 
     //printf("FuncLiteralDeclaration::syntaxCopy('%s')\n", toChars());
     if (s)
         f = (FuncLiteralDeclaration *)s;
     else
-    {
-        Identifier *id = keepId ? ident : NULL;
-        f = new FuncLiteralDeclaration(loc, endloc, type->syntaxCopy(), tok, fes, id);
-    }
+        f = new FuncLiteralDeclaration(loc, endloc, type->syntaxCopy(), tok, fes, ident);
     f->treq = treq;     // don't need to copy
     FuncDeclaration::syntaxCopy(f);
     return f;
@@ -3826,16 +3840,24 @@ void FuncLiteralDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
     TypeFunction *tf = (TypeFunction *)type;
     // Don't print tf->mod, tf->trust, and tf->linkage
-    if (tf->next)
+    if (!inferRetType && tf->next)
         tf->next->toCBuffer2(buf, hgs, 0);
     Parameter::argsToCBuffer(buf, hgs, tf->parameters, tf->varargs);
 
-    ReturnStatement *ret = !fbody->isCompoundStatement() ?
-                            fbody->isReturnStatement() : NULL;
-    if (ret && ret->exp)
+    CompoundStatement *cs = fbody->isCompoundStatement();
+    Statement *s1;
+    if (semanticRun >= PASSsemantic3done)
+    {
+        assert(cs);
+        s1 = (*cs->statements)[cs->statements->dim - 1];
+    }
+    else
+        s1 = !cs ? fbody : NULL;
+    ReturnStatement *rs = s1 ? s1->isReturnStatement() : NULL;
+    if (rs && rs->exp)
     {
         buf->writestring(" => ");
-        ret->exp->toCBuffer(buf, hgs);
+        rs->exp->toCBuffer(buf, hgs);
     }
     else
     {
@@ -4233,16 +4255,16 @@ void SharedStaticCtorDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
 /********************************* StaticDtorDeclaration ****************************/
 
-StaticDtorDeclaration::StaticDtorDeclaration(Loc loc, Loc endloc)
+StaticDtorDeclaration::StaticDtorDeclaration(Loc loc, Loc endloc, StorageClass stc)
     : FuncDeclaration(loc, endloc,
-      Identifier::generateId("_staticDtor"), STCstatic, NULL)
+      Identifier::generateId("_staticDtor"), STCstatic | stc, NULL)
 {
     vgate = NULL;
 }
 
-StaticDtorDeclaration::StaticDtorDeclaration(Loc loc, Loc endloc, const char *name)
+StaticDtorDeclaration::StaticDtorDeclaration(Loc loc, Loc endloc, const char *name, StorageClass stc)
     : FuncDeclaration(loc, endloc,
-      Identifier::generateId(name), STCstatic, NULL)
+      Identifier::generateId(name), STCstatic | stc, NULL)
 {
     vgate = NULL;
 }
@@ -4250,7 +4272,7 @@ StaticDtorDeclaration::StaticDtorDeclaration(Loc loc, Loc endloc, const char *na
 Dsymbol *StaticDtorDeclaration::syntaxCopy(Dsymbol *s)
 {
     assert(!s);
-    StaticDtorDeclaration *sdd = new StaticDtorDeclaration(loc, endloc);
+    StaticDtorDeclaration *sdd = new StaticDtorDeclaration(loc, endloc, storage_class);
     return FuncDeclaration::syntaxCopy(sdd);
 }
 
@@ -4263,7 +4285,7 @@ void StaticDtorDeclaration::semantic(Scope *sc)
     }
 
     if (!type)
-        type = new TypeFunction(NULL, Type::tvoid, FALSE, LINKd);
+        type = new TypeFunction(NULL, Type::tvoid, FALSE, LINKd, storage_class);
 
     /* If the static ctor appears within a template instantiation,
      * it could get called multiple times by the module constructors
@@ -4342,15 +4364,15 @@ void StaticDtorDeclaration::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
 /********************************* SharedStaticDtorDeclaration ****************************/
 
-SharedStaticDtorDeclaration::SharedStaticDtorDeclaration(Loc loc, Loc endloc)
-    : StaticDtorDeclaration(loc, endloc, "_sharedStaticDtor")
+SharedStaticDtorDeclaration::SharedStaticDtorDeclaration(Loc loc, Loc endloc, StorageClass stc)
+    : StaticDtorDeclaration(loc, endloc, "_sharedStaticDtor", stc)
 {
 }
 
 Dsymbol *SharedStaticDtorDeclaration::syntaxCopy(Dsymbol *s)
 {
     assert(!s);
-    SharedStaticDtorDeclaration *sdd = new SharedStaticDtorDeclaration(loc, endloc);
+    SharedStaticDtorDeclaration *sdd = new SharedStaticDtorDeclaration(loc, endloc, storage_class);
     return FuncDeclaration::syntaxCopy(sdd);
 }
 

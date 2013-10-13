@@ -417,6 +417,11 @@ elem *addressElem(elem *e, Type *t, bool alwaysCopy)
         TY ty;
         if (t && ((ty = t->toBasetype()->ty) == Tstruct || ty == Tsarray))
             tx = t->toCtype();
+        else if (tybasic(e2->Ety) == TYstruct)
+        {
+            assert(t);                  // don't know of a case where this can be NULL
+            tx = t->toCtype();
+        }
         else
             tx = type_fake(e2->Ety);
         Symbol *stmp = symbol_genauto(tx);
@@ -616,11 +621,10 @@ elem *sarray_toDarray(Loc loc, Type *tfrom, Type *tto, elem *e)
 
 StructDeclaration *needsPostblit(Type *t)
 {
-    t = t->toBasetype();
-    while (t->ty == Tsarray)
-        t = t->nextOf()->toBasetype();
+    t = t->baseElemOf();
     if (t->ty == Tstruct)
-    {   StructDeclaration *sd = ((TypeStruct *)t)->sym;
+    {
+        StructDeclaration *sd = ((TypeStruct *)t)->sym;
         if (sd->postblit)
             return sd;
     }
@@ -1619,6 +1623,8 @@ elem *StringExp::toElem(IRState *irs)
         outdata(si);
 
         e = el_var(si);
+
+        e->Ejty = e->Ety = TYstruct;
         e->ET = t;
         t->Tcount++;
     }
@@ -2049,7 +2055,8 @@ elem *AssertExp::toElem(IRState *irs)
 
         // If e1 is a class object, call the class invariant on it
         if (global.params.useInvariants && t1->ty == Tclass &&
-            !((TypeClass *)t1)->sym->isInterfaceDeclaration())
+            !((TypeClass *)t1)->sym->isInterfaceDeclaration() &&
+            !((TypeClass *)t1)->sym->isCPPclass())
         {
             ts = symbol_genauto(t1->toCtype());
             int rtl;
@@ -2118,7 +2125,16 @@ elem *AssertExp::toElem(IRState *irs)
                                                        : el_var(assertexp_sfilename);
 
             if (msg)
-            {   elem *emsg = eval_Darray(irs, msg, false);
+            {
+                /* Bugzilla 8360: If the condition is evalated to true,
+                 * msg is not evaluated at all. so should use
+                 * msg->toElemDtor(irs) instead of msg->toElem(irs).
+                 */
+                elem *emsg = msg->toElemDtor(irs);
+                emsg = array_toDarray(msg->type, emsg);
+                if (config.exe == EX_WIN64)
+                    emsg = addressElem(emsg, Type::tvoid->arrayOf(), false);
+
                 ea = el_var(rtlsym[ud ? RTLSYM_DUNITTEST_MSG : RTLSYM_DASSERT_MSG]);
                 ea = el_bin(OPcall, TYvoid, ea, el_params(el_long(TYint, loc.linnum), efilename, emsg, NULL));
             }
@@ -3303,7 +3319,8 @@ elem *CatAssignExp::toElem(IRState *irs)
         Type *tb1n = tb1->nextOf()->toBasetype();
         if ((tb2->ty == Tarray || tb2->ty == Tsarray) &&
             tb1n->equals(tb2->nextOf()->toBasetype()))
-        {   // Append array
+        {
+            // Append array
             e1 = el_una(OPaddr, TYnptr, e1);
             if (config.exe == EX_WIN64)
                 e2 = addressElem(e2, tb2);
@@ -3312,9 +3329,9 @@ elem *CatAssignExp::toElem(IRState *irs)
             elem *ep = el_params(e2, e1, this->e1->type->getTypeInfo(NULL)->toElem(irs), NULL);
             e = el_bin(OPcall, TYdarray, el_var(rtlsym[RTLSYM_ARRAYAPPENDT]), ep);
         }
-        else if (I64)
-        {   // Append element
-
+        else
+        {
+            // Append element
             elem *e2x = NULL;
 
             if (e2->Eoper != OPvar && e2->Eoper != OPconst)
@@ -3355,10 +3372,6 @@ elem *CatAssignExp::toElem(IRState *irs)
             elength = el_bin(OPmin, TYsize_t, elength, el_long(TYsize_t, 1));
             elength = el_bin(OPmul, TYsize_t, elength, el_long(TYsize_t, this->e2->type->size()));
             eptr = el_bin(OPadd, TYnptr, eptr, elength);
-            StructDeclaration *sd = needsPostblit(tb2);
-            elem *epost = NULL;
-            if (sd)
-                epost = el_same(&eptr);
             elem *ederef = el_una(OPind, e2->Ety, eptr);
             elem *eeq = el_bin(OPeq, e2->Ety, ederef, e2);
 
@@ -3374,27 +3387,10 @@ elem *CatAssignExp::toElem(IRState *irs)
                 eeq->ET = tb1n->toCtype();
             }
 
-            /* Need to call postblit on eeq
-             */
-            if (sd)
-            {   FuncDeclaration *fd = sd->postblit;
-                epost = callfunc(loc, irs, 1, Type::tvoid, epost, sd->type->pointerTo(), fd, fd->type, NULL, NULL);
-                eeq = el_bin(OPcomma, epost->Ety, eeq, epost);
-            }
-
             e = el_combine(e2x, e);
             e = el_combine(e, eeq);
             e = el_combine(e, el_var(stmp));
         }
-        else
-        {   // Append element
-            e1 = el_una(OPaddr, TYnptr, e1);
-            e2 = useOPstrpar(e2);
-            elem *ep = el_params(e2, e1, this->e1->type->getTypeInfo(NULL)->toElem(irs), NULL);
-            e = el_bin(OPcall, TYdarray, el_var(rtlsym[RTLSYM_ARRAYAPPENDCT]), ep);
-            e->Eflags |= EFLAGS_variadic;
-        }
-
         el_setLoc(e,loc);
     }
     else
@@ -3977,13 +3973,10 @@ elem *DeleteExp::toElem(IRState *irs)
             /* See if we need to run destructors on the array contents
              */
             elem *et = NULL;
-            Type *tv = tb->nextOf()->toBasetype();
-            while (tv->ty == Tsarray)
-            {   TypeSArray *ta = (TypeSArray *)tv;
-                tv = tv->nextOf()->toBasetype();
-            }
+            Type *tv = tb->nextOf()->baseElemOf();
             if (tv->ty == Tstruct)
-            {   TypeStruct *ts = (TypeStruct *)tv;
+            {
+                TypeStruct *ts = (TypeStruct *)tv;
                 StructDeclaration *sd = ts->sym;
                 if (sd->dtor)
                     et = tb->nextOf()->getTypeInfo(NULL)->toElem(irs);
@@ -4196,30 +4189,30 @@ elem *CastExp::toElem(IRState *irs)
 
         ClassDeclaration *cdfrom = tfrom->isClassHandle();
         ClassDeclaration *cdto   = t->isClassHandle();
+        if (cdfrom->cpp)
+        {
+            if (cdto->cpp)
+            {
+                /* Casting from a C++ interface to a C++ interface
+                 * is always a 'paint' operation
+                 */
+                goto Lret;                  // no-op
+            }
+
+            /* Casting from a C++ interface to a class
+             * always results in null because there is no runtime
+             * information available to do it.
+             *
+             * Casting from a C++ interface to a non-C++ interface
+             * always results in null because there's no way one
+             * can be derived from the other.
+             */
+            e = el_bin(OPcomma, TYnptr, e, el_long(TYnptr, 0));
+            goto Lret;
+        }
         if (cdfrom->isInterfaceDeclaration())
         {
             rtl = RTLSYM_INTERFACE_CAST;
-            if (cdfrom->isCPPinterface())
-            {
-                if (cdto->isCPPinterface())
-                {
-                    /* Casting from a C++ interface to a C++ interface
-                     * is always a 'paint' operation
-                     */
-                    goto Lret;                  // no-op
-                }
-
-                /* Casting from a C++ interface to a class
-                 * always results in null because there is no runtime
-                 * information available to do it.
-                 *
-                 * Casting from a C++ interface to a non-C++ interface
-                 * always results in null because there's no way one
-                 * can be derived from the other.
-                 */
-                e = el_bin(OPcomma, TYnptr, e, el_long(TYnptr, 0));
-                goto Lret;
-            }
         }
         if (cdto->isBaseOf(cdfrom, &offset) && offset != OFFSET_RUNTIME)
         {
@@ -4523,8 +4516,8 @@ Lagain:
                                    fty = Tfloat64;
                                    goto Lagain;
         case X(Tfloat32,Tfloat64): eop = OPf_d; goto Leop;
-        case X(Tfloat32,Timaginary32): goto Lzero;
-        case X(Tfloat32,Timaginary64): goto Lzero;
+        case X(Tfloat32,Timaginary32):
+        case X(Tfloat32,Timaginary64):
         case X(Tfloat32,Timaginary80): goto Lzero;
         case X(Tfloat32,Tcomplex32):
         case X(Tfloat32,Tcomplex64):
@@ -4547,8 +4540,8 @@ Lagain:
         case X(Tfloat64,Tuns64):   eop = OPd_u64; goto Leop;
         case X(Tfloat64,Tfloat32): eop = OPd_f;   goto Leop;
         case X(Tfloat64,Tfloat80): eop = OPd_ld;  goto Leop;
-        case X(Tfloat64,Timaginary32):  goto Lzero;
-        case X(Tfloat64,Timaginary64):  goto Lzero;
+        case X(Tfloat64,Timaginary32):
+        case X(Tfloat64,Timaginary64):
         case X(Tfloat64,Timaginary80):  goto Lzero;
         case X(Tfloat64,Tcomplex32):
         case X(Tfloat64,Tcomplex64):
@@ -4572,8 +4565,8 @@ Lagain:
         case X(Tfloat80,Tuns64):
                                    eop = OPld_u64; goto Leop;
         case X(Tfloat80,Tfloat64): eop = OPld_d; goto Leop;
-        case X(Tfloat80,Timaginary32): goto Lzero;
-        case X(Tfloat80,Timaginary64): goto Lzero;
+        case X(Tfloat80,Timaginary32):
+        case X(Tfloat80,Timaginary64):
         case X(Tfloat80,Timaginary80): goto Lzero;
         case X(Tfloat80,Tcomplex32):
         case X(Tfloat80,Tcomplex64):
@@ -4745,10 +4738,11 @@ Lagain:
             //dump(0);
             //printf("fty = %d, tty = %d, %d\n", fty, tty, t->ty);
             error("e2ir: cannot cast %s of type %s to type %s", e1->toChars(), e1->type->toChars(), t->toChars());
-            goto Lzero;
+            e = el_long(ttym, 0);
+            break;
 
         Lzero:
-            e = el_long(ttym, 0);
+            e = el_bin(OPcomma, ttym, e, el_long(ttym, 0));
             break;
 
         Lpaint:
@@ -5356,37 +5350,9 @@ elem *StructLiteralExp::toElem(IRState *irs)
             {
                 if (t2b->implicitConvTo(t1b))
                 {
-#if 0
-                    // Determine if postblit is needed
-                    int postblit = 0;
-                    if (needsPostblit(t1b))
-                        postblit = 1;
-
-                    if (postblit)
-                    {
-                        /* Generate:
-                         *      _d_arrayctor(ti, From: ep, To: e1)
-                         */
-                        Expression *ti = t1b->nextOf()->toBasetype()->getTypeInfo(NULL);
-                        elem *esize = el_long(TYsize_t, ((TypeSArray *)t1b)->dim->toInteger());
-                        e1 = el_pair(TYdarray, esize, e1);
-                        ep = el_pair(TYdarray, el_copytree(esize), array_toPtr(el->type, ep));
-                        if (config.exe == EX_WIN64)
-                        {
-                            e1 = addressElem(e1, Type::tvoid->arrayOf());
-                            ep = addressElem(ep, Type::tvoid->arrayOf());
-                        }
-                        ep = el_params(e1, ep, ti->toElem(irs), NULL);
-                        int rtl = RTLSYM_ARRAYCTOR;
-                        e1 = el_bin(OPcall, type->totym(), el_var(rtlsym[rtl]), ep);
-                    }
-                    else
-#endif
-                    {
-                        elem *esize = el_long(TYsize_t, t1b->size());
-                        ep = array_toPtr(el->type, ep);
-                        e1 = el_bin(OPmemcpy, TYnptr, e1, el_param(ep, esize));
-                    }
+                    elem *esize = el_long(TYsize_t, t1b->size());
+                    ep = array_toPtr(el->type, ep);
+                    e1 = el_bin(OPmemcpy, TYnptr, e1, el_param(ep, esize));
                 }
                 else
                 {
@@ -5402,20 +5368,10 @@ elem *StructLiteralExp::toElem(IRState *irs)
                     e1->ET = v->type->toCtype();
                 e1 = el_bin(OPeq, ty, e1, ep);
                 if (tybasic(ty) == TYstruct)
-                {   e1->Eoper = OPstreq;
+                {
+                    e1->Eoper = OPstreq;
                     e1->ET = v->type->toCtype();
                 }
-#if 0
-                /* Call postblit() on e1
-                 */
-                StructDeclaration *sd = needsPostblit(v->type);
-                if (sd && el->isLvalue())
-                {   FuncDeclaration *fd = sd->postblit;
-                    ec = el_copytree(ec);
-                    ec = callfunc(loc, irs, 1, Type::tvoid, ec, sd->type->pointerTo(), fd, fd->type, NULL, NULL);
-                    e1 = el_bin(OPcomma, ec->Ety, e1, ec);
-                }
-#endif
             }
             e = el_combine(e, e1);
         }

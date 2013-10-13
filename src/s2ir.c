@@ -765,12 +765,12 @@ void ReturnStatement::toIR(IRState *irs)
             if (exp->op == TOKstructliteral)
             {   StructLiteralExp *se = (StructLiteralExp *)exp;
                 char save[sizeof(StructLiteralExp)];
-                memcpy(save, se, sizeof(StructLiteralExp));
+                memcpy(save, (void*)se, sizeof(StructLiteralExp));
                 se->sym = irs->shidden;
                 se->soffset = 0;
                 se->fillHoles = 1;
                 e = exp->toElemDtor(irs);
-                memcpy(se, save, sizeof(StructLiteralExp));
+                memcpy((void*)se, save, sizeof(StructLiteralExp));
 
             }
             else
@@ -797,25 +797,6 @@ void ReturnStatement::toIR(IRState *irs)
                 es = el_bin(op, ety, es, e);
                 if (op == OPstreq)
                     es->ET = exp->type->toCtype();
-#if 0//DMDV2
-                /* Call postBlit() on *shidden
-                 */
-                Type *tb = exp->type->toBasetype();
-                //if (tb->ty == Tstruct) exp->dump(0);
-                if (exp->isLvalue() && tb->ty == Tstruct)
-                {   StructDeclaration *sd = ((TypeStruct *)tb)->sym;
-                    if (sd->postblit)
-                    {   FuncDeclaration *fd = sd->postblit;
-                        if (fd->storage_class & STCdisable)
-                        {
-                            fd->toParent()->error(loc, "is not copyable because it is annotated with @disable");
-                        }
-                        elem *ec = el_var(irs->shidden);
-                        ec = callfunc(loc, irs, 1, Type::tvoid, ec, tb->pointerTo(), fd, fd->type, NULL, NULL);
-                        es = el_bin(OPcomma, ec->Ety, es, ec);
-                    }
-                }
-#endif
             }
             e = el_var(irs->shidden);
             e = el_bin(OPcomma, e->Ety, es, e);

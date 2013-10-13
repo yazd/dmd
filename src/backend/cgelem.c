@@ -401,6 +401,15 @@ STATIC elem *fixconvop(elem *e)
             return optelem(ecomma, GOALvalue);
         }
 
+        if (e->E1->Eoper == OPd_f && OTconv(e->E1->E1->Eoper) && tyintegral(tyme))
+        {   e1 = e->E1;
+            e->E1 = e1->E1;
+            e->E2 = el_una(OPf_d, e->E1->Ety, e->E2);
+            e1->E1 = NULL;
+            el_free(e1);
+            return fixconvop(e);
+        }
+
         tycop = e->E1->Ety;
         tym = e->E1->E1->Ety;
         e->E1 = el_selecte1(e->E1);     /* dump it for now              */
@@ -2506,8 +2515,8 @@ STATIC bool optim_loglog(elem **pe)
             if (0 && eq->E2->Eoper != OPconst)
             {
                 printf("eq = %p, eq->E2 = %p\n", eq, eq->E2);
-                printf("first = %d, i = %d, last = %d, Eoper = %d\n", first, i, last, eq->E2->Eoper);
-                printf("any = %d, n = %d, count = %d, min = %d, max = %d\n", any, (int)n, last - first + 1, (int)emin, (int)emax);
+                printf("first = %d, i = %d, last = %d, Eoper = %d\n", (int)first, (int)i, (int)last, eq->E2->Eoper);
+                printf("any = %d, n = %d, count = %d, min = %d, max = %d\n", any, (int)n, (int)(last - first + 1), (int)emin, (int)emax);
             }
             assert(eq->E2->Eoper == OPconst);
             bits |= (targ_ullong)1 << (el_tolong(eq->E2) - emin);
@@ -2931,6 +2940,12 @@ STATIC elem * eladdr(elem *e, goal_t goal)
         e = optelem(e,GOALvalue);
         break;
     }
+    case OPinfo:
+        // Replace &(e1 info e2) with (e1 info &e2)
+        e = el_selecte1(e);
+        e->E2 = el_una(OPaddr,tym,e->E2);
+        e = optelem(e,GOALvalue);
+        break;
   }
   return e;
 }

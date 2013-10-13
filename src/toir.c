@@ -447,9 +447,9 @@ int intrinsic_op(char *name)
 
         "5bitop3bsfFNaNbNfkZi",
         "5bitop3bsrFNaNbNfkZi",
-        "5bitop3btcFNaNbNfPkkZi",
-        "5bitop3btrFNaNbNfPkkZi",
-        "5bitop3btsFNaNbNfPkkZi",
+        "5bitop3btcFNaNbPkkZi",
+        "5bitop3btrFNaNbPkkZi",
+        "5bitop3btsFNaNbPkkZi",
         "5bitop3inpFNbkZh",
         "5bitop4inplFNbkZk",
         "5bitop4inpwFNbkZt",
@@ -484,9 +484,9 @@ int intrinsic_op(char *name)
 
         "5bitop3bsfFNaNbNfmZi",
         "5bitop3bsrFNaNbNfmZi",
-        "5bitop3btcFNaNbNfPmmZi",
-        "5bitop3btrFNaNbNfPmmZi",
-        "5bitop3btsFNaNbNfPmmZi",
+        "5bitop3btcFNaNbPmmZi",
+        "5bitop3btrFNaNbPmmZi",
+        "5bitop3btsFNaNbPmmZi",
         "5bitop3inpFNbkZh",
         "5bitop4inplFNbkZk",
         "5bitop4inpwFNbkZt",
@@ -853,22 +853,17 @@ RET TypeFunction::retStyle()
     Type *tns = tn;
 
     if (global.params.isWindows && global.params.is64bit)
-    {   // http://msdn.microsoft.com/en-us/library/7572ztz4(v=vs.80)
+    {
+        // http://msdn.microsoft.com/en-us/library/7572ztz4(v=vs.80)
         if (tns->ty == Tcomplex32)
             return RETstack;
         if (tns->isscalar())
             return RETregs;
 
-        if (tns->ty == Tsarray)
-        {
-            do
-            {
-                tns = tns->nextOf()->toBasetype();
-            } while (tns->ty == Tsarray);
-        }
-
+        tns = tns->baseElemOf();
         if (tns->ty == Tstruct)
-        {   StructDeclaration *sd = ((TypeStruct *)tns)->sym;
+        {
+            StructDeclaration *sd = ((TypeStruct *)tns)->sym;
             if (!sd->isPOD() || sz >= 8)
                 return RETstack;
         }
@@ -880,11 +875,7 @@ RET TypeFunction::retStyle()
 Lagain:
     if (tns->ty == Tsarray)
     {
-        do
-        {
-            tns = tns->nextOf()->toBasetype();
-        } while (tns->ty == Tsarray);
-
+        tns = tns->baseElemOf();
         if (tns->ty != Tstruct)
         {
 L2:

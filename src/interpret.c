@@ -996,12 +996,6 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
         return EXP_CANT_INTERPRET;
     }
 
-    // If we're about to leave CTFE, make sure we don't crash the
-    // compiler by returning a CTFE-internal expression.
-    if (!istate && !evaluatingArgs)
-    {
-        e = scrubReturnValue(loc, e);
-    }
     return e;
 }
 
@@ -1184,8 +1178,11 @@ bool stopPointersEscaping(Loc loc, Expression *e)
         return true;
     if ( isPointer(e->type) )
     {
-        if (e->op == TOKvar && ((VarExp *)e)->var->isVarDeclaration() &&
-            ctfeStack.isInCurrentFrame( ((VarExp *)e)->var->isVarDeclaration() ) )
+        Expression *x = e;
+        if (e->op == TOKaddress)
+            x = ((AddrExp *)e)->e1;
+        if (x->op == TOKvar && ((VarExp *)x)->var->isVarDeclaration() &&
+            ctfeStack.isInCurrentFrame( ((VarExp *)x)->var->isVarDeclaration() ) )
         {   error(loc, "returning a pointer to a local stack variable");
             return false;
         }
@@ -1292,20 +1289,55 @@ Expression *scrubReturnValue(Loc loc, Expression *e)
     return e;
 }
 
+// Return true if every element is either void,
+// or is an array literal or struct literal of void elements.
+bool isEntirelyVoid(Expressions *elems)
+{
+    for (size_t i = 0; i < elems->dim; i++)
+    {
+        Expression *m = (*elems)[i];
+        // It can be NULL for performance reasons,
+        // see StructLiteralExp::interpret().
+        if (!m)
+            continue;
+
+        if (!(m->op == TOKvoid) &&
+            !(m->op == TOKarrayliteral && isEntirelyVoid(((ArrayLiteralExp *)m)->elements)) &&
+            !(m->op == TOKstructliteral && isEntirelyVoid(((StructLiteralExp *)m)->elements)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Scrub all members of an array. Return false if error
 bool scrubArray(Loc loc, Expressions *elems, bool structlit)
 {
     for (size_t i = 0; i < elems->dim; i++)
     {
         Expression *m = (*elems)[i];
+        // It can be NULL for performance reasons,
+        // see StructLiteralExp::interpret().
         if (!m)
             continue;
-        if (m && m->op == TOKvoid && structlit)
-            m = NULL;
-        if (m)
+
+        // A struct .init may contain void members.
+        // Static array members are a weird special case (bug 10994).
+        if (structlit &&
+            ((m->op == TOKvoid) ||
+             (m->op == TOKarrayliteral && m->type->ty == Tsarray && isEntirelyVoid(((ArrayLiteralExp *)m)->elements)) ||
+             (m->op == TOKstructliteral && isEntirelyVoid(((StructLiteralExp *)m)->elements)))
+           )
+        {
+                m = NULL;
+        }
+        else
+        {
             m = scrubReturnValue(loc, m);
-        if (m == EXP_CANT_INTERPRET)
-            return false;
+            if (m == EXP_CANT_INTERPRET)
+                return false;
+        }
         (*elems)[i] = m;
     }
     return true;
@@ -1351,21 +1383,19 @@ Expression *ReturnStatement::interpret(InterState *istate)
     {   e = exp->interpret(istate, ctfeNeedLvalue);
         if (exceptionOrCantInterpret(e))
             return e;
-        // Disallow returning pointers to stack-allocated variables (bug 7876)
-        if (e->op == TOKvar && ((VarExp *)e)->var->isVarDeclaration() &&
-            ctfeStack.isInCurrentFrame( ((VarExp *)e)->var->isVarDeclaration() ) )
-        {   error("returning a pointer to a local stack variable");
-            return EXP_CANT_INTERPRET;
-        }
     }
     else
     {
         e = exp->interpret(istate);
         if (exceptionOrCantInterpret(e))
             return e;
-        if (!stopPointersEscaping(loc, e))
-            return EXP_CANT_INTERPRET;
     }
+
+    // Disallow returning pointers to stack-allocated variables (bug 7876)
+
+    if (!stopPointersEscaping(loc, e))
+        return EXP_CANT_INTERPRET;
+
     if (needToCopyLiteral(e))
         e = copyLiteral(e);
 #if LOGASSIGN
@@ -2043,9 +2073,12 @@ Expression *SymOffExp::interpret(InterState *istate, CtfeGoal goal)
     }
     else if ( offset == 0 && isSafePointerCast(var->type, pointee) )
     {
+        // Create a CTFE pointer &var
         VarExp *ve = new VarExp(loc, var);
-        ve->type = type;
-        return ve;
+        ve->type = var->type;
+        AddrExp *re = new AddrExp(loc, ve);
+        re->type = type;
+        return re;
     }
 
     error("Cannot convert &%s to %s at compile time", var->type->toChars(), type->toChars());
@@ -2179,7 +2212,7 @@ Expression *getVarExp(Loc loc, InterState *istate, Declaration *d, CtfeGoal goal
 #endif
         {
             if(v->scope)
-                v->init->semantic(v->scope, v->type, INITinterpret); // might not be run on aggregate members
+                v->init = v->init->semantic(v->scope, v->type, INITinterpret); // might not be run on aggregate members
             e = v->init->toExpression(v->type);
             if (v->inuse)
             {
@@ -2664,11 +2697,22 @@ Expression *StructLiteralExp::interpret(InterState *istate, CtfeGoal goal)
         {
             e = (*elements)[i];
             if (!e)
-                continue;
-
-            ex = e->interpret(istate);
-            if (exceptionOrCantInterpret(ex))
-                return ex;
+            {
+                /* Ideally, we'd convert NULL members into void expressions.
+                * The problem is that the VoidExp will be removed when we
+                * leave CTFE, causing another memory allocation if we use this
+                * same struct literal again.
+                *
+                * ex = sd->fields[i]->type->voidInitLiteral(sd->fields[i]);
+                */
+                ex = NULL;
+            }
+            else
+            {
+                ex = e->interpret(istate);
+                if (exceptionOrCantInterpret(ex))
+                    return ex;
+            }
         }
 
         /* If any changes, do Copy On Write
@@ -2788,7 +2832,16 @@ Expression *NewExp::interpret(InterState *istate, CtfeGoal goal)
                 Dsymbol *s = c->fields[i];
                 VarDeclaration *v = s->isVarDeclaration();
                 assert(v);
-                Expression *m = v->init ? v->init->toExpression() : v->type->defaultInitLiteral(loc);
+                Expression *m;
+                if (v->init)
+                {
+                    if (v->init->isVoidInitializer())
+                        m = v->type->voidInitLiteral(v);
+                    else
+                        m = v->getConstInitializer(true);
+                }
+                else
+                    m = v->type->defaultInitLiteral(loc);
                 if (exceptionOrCantInterpret(m))
                     return m;
                 (*elems)[fieldsSoFar+i] = copyLiteral(m);
@@ -2931,14 +2984,14 @@ Expression *BinExp::interpretCompareCommon(InterState *istate, CtfeGoal goal, fp
     Expression *e2;
 
 #if LOG
-    printf("%s BinExp::interpretCommon2() %s\n", loc.toChars(), toChars());
+    printf("%s BinExp::interpretCompareCommon() %s\n", loc.toChars(), toChars());
 #endif
     if (this->e1->type->ty == Tpointer && this->e2->type->ty == Tpointer)
     {
-        e1 = this->e1->interpret(istate, ctfeNeedLvalue);
+        e1 = this->e1->interpret(istate);
         if (exceptionOrCantInterpret(e1))
             return e1;
-        e2 = this->e2->interpret(istate, ctfeNeedLvalue);
+        e2 = this->e2->interpret(istate);
         if (exceptionOrCantInterpret(e2))
             return e2;
         dinteger_t ofs1, ofs2;
@@ -3197,7 +3250,7 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
         if (exceptionOrCantInterpret(e1))
             return e1;
         if (!(e1->op == TOKvar || e1->op == TOKdotvar || e1->op == TOKindex
-            || e1->op == TOKslice))
+            || e1->op == TOKslice || e1->op == TOKstructliteral))
         {
             error("cannot dereference invalid pointer %s",
                 this->e1->toChars());
@@ -3206,7 +3259,7 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
     }
 
     if (!(e1->op == TOKarraylength || e1->op == TOKvar || e1->op == TOKdotvar
-        || e1->op == TOKindex || e1->op == TOKslice))
+        || e1->op == TOKindex || e1->op == TOKslice || e1->op == TOKstructliteral))
     {
         error("CTFE internal error: unsupported assignment %s", toChars());
         return EXP_CANT_INTERPRET;
@@ -3518,18 +3571,17 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
     // collapsed into a single assignment.
     if (!wantRef && e1->op == TOKdotvar)
     {
-        // Strip of all of the leading dotvars, unless we started with a call
-        // or a ref parameter
+        // Strip of all of the leading dotvars, unless it is a CTFE dotvar
+        // pointer or reference
         // (in which case, we already have the lvalue).
-        if (this->e1->op != TOKcall && !(this->e1->op==TOKvar
-            && ((VarExp*)this->e1)->var->storage_class & (STCref | STCout)))
-            e1 = e1->interpret(istate, isPointer(type)? ctfeNeedLvalueRef : ctfeNeedLvalue);
-        if (exceptionOrCantInterpret(e1))
-            return e1;
-        if (e1->op == TOKstructliteral && newval->op == TOKstructliteral)
+        DotVarExp *dve = (DotVarExp *)e1;
+        bool isCtfePointer = (dve->e1->op == TOKstructliteral)
+                && ((StructLiteralExp *)(dve->e1))->ownedByCtfe;
+        if (!isCtfePointer)
         {
-            assignInPlace(e1, newval);
-            return returnValue;
+            e1 = e1->interpret(istate, isPointer(type) ? ctfeNeedLvalueRef : ctfeNeedLvalue);
+            if (exceptionOrCantInterpret(e1))
+                return e1;
         }
     }
 #if LOGASSIGN
@@ -3578,6 +3630,15 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
                 v->setValue(newval);
             }
         }
+    }
+    else if (e1->op == TOKstructliteral && newval->op == TOKstructliteral)
+    {
+        /* Assignment to complete struct of the form:
+         *  e1 = newval
+         * (e1 was a ref parameter, or was created via TOKstar dereferencing).
+         */
+        assignInPlace(e1, newval);
+        return returnValue;
     }
     else if (e1->op == TOKdotvar)
     {
@@ -3961,7 +4022,7 @@ Expression *interpretAssignToSlice(InterState *istate, CtfeGoal goal, Loc loc,
         return newval;
 
     Expression *aggregate = resolveReferences(sexp->e1);
-    dinteger_t firstIndex = lowerbound;
+    sinteger_t firstIndex = lowerbound;
 
     ArrayLiteralExp *existingAE = NULL;
     StringExp *existingSE = NULL;
@@ -4815,7 +4876,7 @@ Expression *CondExp::interpret(InterState *istate, CtfeGoal goal)
     Expression *e;
     if ( isPointer(econd->type) )
     {
-        e = econd->interpret(istate, ctfeNeedLvalue);
+        e = econd->interpret(istate);
         if (exceptionOrCantInterpret(e))
             return e;
         if (e->op != TOKnull)
@@ -4894,7 +4955,7 @@ Expression *IndexExp::interpret(InterState *istate, CtfeGoal goal)
         {
             dinteger_t len = ArrayLength(Type::tsize_t, agg)->toInteger();
             //Type *pointee = ((TypePointer *)agg->type)->next;
-            if ((indx + ofs) < 0 || (indx+ofs) > len)
+            if ((sinteger_t)(indx + ofs) < 0 || (indx+ofs) > len)
             {
                 error("pointer index [%lld] exceeds allocated memory block [0..%lld]",
                     indx+ofs, len);
@@ -4940,7 +5001,7 @@ Expression *IndexExp::interpret(InterState *istate, CtfeGoal goal)
 
     if (e1->op == TOKnull)
     {
-        if (goal == ctfeNeedLvalue && e1->type->ty == Taarray)
+        if (goal == ctfeNeedLvalue && e1->type->ty == Taarray && modifiable)
             return paintTypeOntoLiteral(type, e1);
         error("cannot index null array %s", this->e1->toChars());
         return EXP_CANT_INTERPRET;
@@ -5639,8 +5700,26 @@ Expression *PtrExp::interpret(InterState *istate, CtfeGoal goal)
             if (e->op == TOKaddress)
             {
                 e = ((AddrExp*)e)->e1;
-                if (e->op == TOKdotvar || e->op == TOKindex)
+                // We're changing *&e to e.
+                // We needed the AddrExp to deal with type painting expressions
+                // we couldn't otherwise express. Now that the type painting is
+                // undone, we must simplify them. This applies to references
+                // (which will be a DotVarExp or IndexExp) and to local structs
+                // (which will be a VarExp).
+
+                // We sometimes use DotVarExp and IndexExp to represent pointers,
+                // so in that case, they shouldn't be simplified.
+
+                bool isCtfePtr = (e->op == TOKdotvar || e->op == TOKindex)
+                        && isPointer(e->type);
+
+                // We also must not simplify if it is already a struct Literal
+                // or array literal, because it has already been interpreted.
+                if ( !isCtfePtr && e->op != TOKstructliteral &&
+                    e->op != TOKassocarrayliteral && e->op != TOKarrayliteral)
+                {
                     e = e->interpret(istate, goal);
+                }
             }
             else if (e->op == TOKvar)
             {
@@ -5656,7 +5735,7 @@ Expression *PtrExp::interpret(InterState *istate, CtfeGoal goal)
             error("dereference of null pointer '%s'", e1->toChars());
             return EXP_CANT_INTERPRET;
         }
-        e->type = type;
+        e = paintTypeOntoLiteral(type, e);
     }
 
 #if LOG
@@ -5695,6 +5774,10 @@ Expression *DotVarExp::interpret(InterState *istate, CtfeGoal goal)
         }
         if (ex->op == TOKnull && ex->type->toBasetype()->ty == Tclass)
         {   error("class '%s' is null and cannot be dereferenced", e1->toChars());
+            return EXP_CANT_INTERPRET;
+        }
+        if (ex->op == TOKnull)
+        {   error("dereference of null pointer '%s'", e1->toChars());
             return EXP_CANT_INTERPRET;
         }
         if (ex->op == TOKstructliteral || ex->op == TOKclassreference)
@@ -5742,7 +5825,7 @@ Expression *DotVarExp::interpret(InterState *istate, CtfeGoal goal)
             }
             if (!e)
             {
-                error("couldn't find field %s in %s", v->toChars(), type->toChars());
+                error("Internal Compiler Error: Null field %s", v->toChars());
                 return EXP_CANT_INTERPRET;
             }
             // If it is an rvalue literal, return it...
@@ -5752,8 +5835,7 @@ Expression *DotVarExp::interpret(InterState *istate, CtfeGoal goal)
             if (e->op == TOKvoid)
             {
                 VoidInitExp *ve = (VoidInitExp *)e;
-                error("cannot read uninitialized variable %s in ctfe", toChars());
-                ve->var->error("was uninitialized and used before set");
+                error("cannot read uninitialized variable %s in CTFE", ve->var->toChars());
                 return EXP_CANT_INTERPRET;
             }
             if ( isPointer(type) )

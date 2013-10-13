@@ -2479,6 +2479,30 @@ template useItemAt10067(size_t idx, T)
 useItemAt10067!(0, char) mapS10067;
 
 /******************************************/
+// 4072
+
+void bug4072(T)(T x)
+    if (is(typeof(bug4072(x))))
+{}
+
+static assert(!is(typeof(bug4072(7))));
+
+/******************************************/
+// 10074
+
+template foo10074(F)
+{
+    enum foo10074 = false;
+}
+bool foo10074(F)(F f)
+    if (foo10074!F)
+{
+    return false;
+}
+
+static assert(!is(typeof(foo10074(1))));
+
+/******************************************/
 // 10083
 
 // [a-c] IFTI can find syntactic eponymous member
@@ -2781,6 +2805,39 @@ void test10592()
 }
 
 /******************************************/
+// 10811
+
+void foo10811a(R1, R2)(R1, R2) {}
+template foo10811a(alias pred) { void foo10811a(R1, R2)(R1, R2) {} }
+
+template foo10811b(alias pred) { void foo10811b(R1, R2)(R1, R2) {} }
+void foo10811b(R1, R2)(R1, R2) {}
+
+void test10811()
+{
+    foo10811a(1, 2);
+    foo10811a!(a => a)(1, 2);
+
+    foo10811b(1, 2);
+    foo10811b!(a => a)(1, 2);
+}
+
+/******************************************/
+// 10969
+
+template A10969(T, U...) { alias A10969 = T; }
+void foo10969(T, U...)(A10969!(T, U) a) {}
+
+template B10969(T, U) { alias B10969 = T; }
+void bar10969(T, U...)(B10969!(T, U[0]) a) {}
+
+void test10969()
+{
+    foo10969!(int, float)(3);
+    bar10969!(int, float)(3);
+}
+
+/******************************************/
 
 int main()
 {
@@ -2868,6 +2925,8 @@ int main()
     test9977();
     test10083();
     test10592();
+    test10811();
+    test10969();
 
     printf("Success\n");
     return 0;

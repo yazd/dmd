@@ -2237,8 +2237,9 @@ STATIC int asm_isNonZeroInt(OPND *o)
 STATIC int asm_is_fpreg(char *szReg)
 {
 #if 1
-        return(szReg[2] == '\0' && szReg[0] == 'S' &&
-                szReg[1] == 'T');
+        return(szReg[0] == 'S' &&
+               szReg[1] == 'T' &&
+               szReg[2] == 0);
 #else
         return(szReg[2] == '\0' && (szReg[0] == 's' || szReg[0] == 'S') &&
                 (szReg[1] == 't' || szReg[1] == 'T'));
@@ -2615,6 +2616,7 @@ STATIC void asm_make_modrm_byte(
             {
                 pc->IFL1 = FLfunc;
                 pc->IEVdsym1 = d;
+                pc->Iflags |= CFoff;
                 pc->IEVoffset1 = popnd->disp;
             }
             else
@@ -3981,6 +3983,8 @@ STATIC OPND *asm_rel_exp()
                         case TOKle:
                             o1->disp = o1->disp <= o2->disp;
                             break;
+                        default:
+                            assert(0);
                     }
                 }
                 else
@@ -4407,14 +4411,17 @@ STATIC OPND *asm_primary_exp()
                 {
                     asm_token();
                     if (tok_value == TOKlparen)
-                    {   unsigned n;
-
+                    {
                         asm_token();
+                        if (tok_value == TOKint32v)
+                        {
+                            unsigned n = (unsigned)asmtok->uns64value;
+                            if (n > 7)
+                                asmerr(EM_bad_operand);
+                            else
+                                o1->base = &(aregFp[n]);
+                        }
                         asm_chktok(TOKint32v, EM_num);
-                        n = (unsigned)asmtok->uns64value;
-                        if (n > 7)
-                            asmerr(EM_bad_operand);
-                        o1->base = &(aregFp[n]);
                         asm_chktok(TOKrparen, EM_rpar);
                     }
                     else
@@ -4562,6 +4569,9 @@ STATIC OPND *asm_primary_exp()
                 o1->s = asmstate.psLocalsize;
                 o1->ptype = Type::tint32;
                 asm_token();
+                break;
+
+             default:
                 break;
         }
 Lret:

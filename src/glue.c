@@ -131,7 +131,7 @@ void obj_write_deferred(Library *library)
 
             md->genobjfile(0);
         }
-     
+
         /* Set object file name to be source name with sequence number,
          * as mangled symbol names get way too long.
          */
@@ -532,6 +532,7 @@ void FuncDeclaration::toObjFile(int multiobj)
     int has_arguments;
 
     //printf("FuncDeclaration::toObjFile(%p, %s.%s)\n", func, parent->toChars(), func->toChars());
+
     //if (type) printf("type = %s\n", func->type->toChars());
 #if 0
     //printf("line = %d\n",func->getWhere() / LINEINC);
@@ -578,10 +579,50 @@ void FuncDeclaration::toObjFile(int multiobj)
         return;
     }
     assert(semanticRun == PASSsemantic3done);
+    assert(ident != Id::empty);
+
+    /* Skip generating code if this part of a TemplateInstance that is instantiated
+     * only by non-root modules (i.e. modules not listed on the command line).
+     */
+    TemplateInstance *ti = inTemplateInstance();
+    if (!global.params.useUnitTests &&
+        ti && ti->instantiatingModule && !ti->instantiatingModule->isRoot())
+    {
+        Module *mi = ti->instantiatingModule;
+
+        // If mi imports any root modules, we still need to generate the code.
+        for (size_t i = 0; i < Module::amodules.dim; ++i)
+        {
+            Module *m = Module::amodules[i];
+            m->insearch = 0;
+        }
+        bool importsRoot = false;
+        for (size_t i = 0; i < Module::amodules.dim; ++i)
+        {
+            Module *m = Module::amodules[i];
+            if (m->isRoot() && mi->imports(m))
+            {
+                importsRoot = true;
+                break;
+            }
+        }
+        for (size_t i = 0; i < Module::amodules.dim; ++i)
+        {
+            Module *m = Module::amodules[i];
+            m->insearch = 0;
+        }
+        if (!importsRoot)
+        {
+            //printf("instantiated by %s   %s\n", ti->instantiatingModule->toChars(), ti->toChars());
+            return;
+        }
+    }
+
+    // start code generation
     semanticRun = PASSobj;
 
     if (global.params.verbose)
-        printf("function  %s\n",func->toPrettyChars());
+        fprintf(global.stdmsg, "function  %s\n",func->toPrettyChars());
 
     Symbol *s = func->toSymbol();
     func_t *f = s->Sfunc;
@@ -822,12 +863,9 @@ void FuncDeclaration::toObjFile(int multiobj)
     if (parameters)
     {
         for (size_t i = 0; i < parameters->dim; i++)
-        {   VarDeclaration *v = (*parameters)[i];
-            if (v->csym)
-            {
-                error("compiler error, parameter '%s', bugzilla 2962?", v->toChars());
-                assert(0);
-            }
+        {
+            VarDeclaration *v = (*parameters)[i];
+            assert(!v->csym);
             params[pi + i] = v->toSymbol();
         }
         pi += parameters->dim;

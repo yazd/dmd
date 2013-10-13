@@ -26,11 +26,12 @@
 
 #include "mars.h"
 #include "module.h"
+#include "scope.h"
 #include "mtype.h"
 #include "id.h"
 #include "cond.h"
 #include "expression.h"
-#include "lexer.h"
+#include "parse.h"
 #include "lib.h"
 #include "json.h"
 
@@ -63,6 +64,22 @@ void toWinPath(char *src)
             *src = '\\';
         src++;
     }
+}
+
+Ungag::~Ungag()
+{
+    //printf("+ungag dtor gag %d => %d\n", global.gag, oldgag);
+    global.gag = oldgag;
+}
+
+Ungag Dsymbol::ungagSpeculative()
+{
+    unsigned oldgag = global.gag;
+
+    if (global.isSpeculativeGagging() && !isSpeculative())
+        global.gag = 0;
+
+    return Ungag(oldgag);
 }
 
 Global global;
@@ -110,6 +127,7 @@ void Global::init()
     ;
 
     compiler.vendor = "Digital Mars D";
+    stdmsg = stdout;
 
     main_d = "__main.d";
 
@@ -414,6 +432,52 @@ extern "C"
     extern int _end;
 }
 #endif
+
+static Module *entrypoint = NULL;
+
+/************************************
+ * Generate C main() in response to seeing D main().
+ * This used to be in druntime, but contained a reference to _Dmain
+ * which didn't work when druntime was made into a dll and was linked
+ * to a program, such as a C++ program, that didn't have a _Dmain.
+ */
+
+void genCmain(Scope *sc)
+{
+    if (entrypoint)
+        return;
+
+    /* The D code to be generated is provided as D source code in the form of a string.
+     * Note that Solaris, for unknown reasons, requires both a main() and an _main()
+     */
+    static utf8_t code[] = "extern(C) {\n\
+        int _d_run_main(int argc, char **argv, void* mainFunc);\n\
+        int _Dmain(char[][] args);\n\
+        int main(int argc, char **argv) { return _d_run_main(argc, argv, &_Dmain); }\n\
+        version (Solaris) int _main(int argc, char** argv) { return main(argc, argv); }\n\
+        }\n\
+        ";
+
+    Identifier *id = Id::entrypoint;
+    Module *m = new Module("__entrypoint.d", id, 0, 0);
+
+    Parser p(m, code, sizeof(code) / sizeof(code[0]), 0);
+    p.scanloc = Loc();
+    p.nextToken();
+    m->members = p.parseModule();
+    assert(p.token.value == TOKeof);
+
+    char v = global.params.verbose;
+    global.params.verbose = 0;
+    m->importedFrom = sc->module;
+    m->importAll(NULL);
+    m->semantic();
+    m->semantic2();
+    m->semantic3();
+    global.params.verbose = v;
+
+    entrypoint = m;
+}
 
 int tryMain(size_t argc, char *argv[])
 {
@@ -1181,9 +1245,9 @@ Language changes listed by -transition=id:\n\
     initPrecedence();
 
     if (global.params.verbose)
-    {   printf("binary    %s\n", argv[0]);
-        printf("version   %s\n", global.version);
-        printf("config    %s\n", inifilename ? inifilename : "(none)");
+    {   fprintf(global.stdmsg, "binary    %s\n", argv[0]);
+        fprintf(global.stdmsg, "version   %s\n", global.version);
+        fprintf(global.stdmsg, "config    %s\n", inifilename ? inifilename : "(none)");
     }
 
     //printf("%d source files\n",files.dim);
@@ -1397,10 +1461,10 @@ Language changes listed by -transition=id:\n\
     {
         m = modules[modi];
         if (global.params.verbose)
-            printf("parse     %s\n", m->toChars());
+            fprintf(global.stdmsg, "parse     %s\n", m->toChars());
         if (!Module::rootModule)
             Module::rootModule = m;
-        m->importedFrom = m;
+        m->importedFrom = m;    // m->isRoot() == true
         if (!global.params.oneobj || modi == 0 || m->isDocFile)
             m->deleteObjFile();
 #if ASYNCREAD
@@ -1457,7 +1521,7 @@ Language changes listed by -transition=id:\n\
         {
             m = modules[i];
             if (global.params.verbose)
-                printf("import    %s\n", m->toChars());
+                fprintf(global.stdmsg, "import    %s\n", m->toChars());
             m->genhdrfile();
         }
     }
@@ -1469,7 +1533,7 @@ Language changes listed by -transition=id:\n\
     {
        m = modules[i];
        if (global.params.verbose)
-           printf("importall %s\n", m->toChars());
+           fprintf(global.stdmsg, "importall %s\n", m->toChars());
        m->importAll(NULL);
     }
     if (global.errors)
@@ -1482,7 +1546,7 @@ Language changes listed by -transition=id:\n\
     {
         m = modules[i];
         if (global.params.verbose)
-            printf("semantic  %s\n", m->toChars());
+            fprintf(global.stdmsg, "semantic  %s\n", m->toChars());
         m->semantic();
     }
     if (global.errors)
@@ -1496,7 +1560,7 @@ Language changes listed by -transition=id:\n\
     {
         m = modules[i];
         if (global.params.verbose)
-            printf("semantic2 %s\n", m->toChars());
+            fprintf(global.stdmsg, "semantic2 %s\n", m->toChars());
         m->semantic2();
     }
     if (global.errors)
@@ -1507,13 +1571,11 @@ Language changes listed by -transition=id:\n\
     {
         m = modules[i];
         if (global.params.verbose)
-            printf("semantic3 %s\n", m->toChars());
+            fprintf(global.stdmsg, "semantic3 %s\n", m->toChars());
         m->semantic3();
     }
-    Module::runDeferredSemantic3();
     if (global.errors)
         fatal();
-
     if (global.params.useInline)
     {
         /* The problem with useArrayBounds and useAssert is that the
@@ -1530,25 +1592,28 @@ Language changes listed by -transition=id:\n\
             {
                 m = Module::amodules[i];
                 if (global.params.verbose)
-                    printf("semantic3 %s\n", m->toChars());
+                    fprintf(global.stdmsg, "semantic3 %s\n", m->toChars());
                 m->semantic3();
             }
             if (global.errors)
                 fatal();
         }
     }
+    Module::runDeferredSemantic3();
+    if (global.errors)
+        fatal();
 
     if (global.params.moduleDeps)
     {
         OutBuffer* ob = global.params.moduleDeps;
-        if (global.params.moduleDepsFile) 
+        if (global.params.moduleDepsFile)
         {
             File deps(global.params.moduleDepsFile);
             deps.setbuffer((void*)ob->data, ob->offset);
             deps.writev();
         }
         else
-            printf("%.*s", ob->offset, ob->data);
+            printf("%.*s", (int)ob->offset, ob->data);
     }
 
     // Scan for functions to inline
@@ -1558,7 +1623,7 @@ Language changes listed by -transition=id:\n\
         {
             m = modules[i];
             if (global.params.verbose)
-                printf("inline scan %s\n", m->toChars());
+                fprintf(global.stdmsg, "inline scan %s\n", m->toChars());
             m->inlineScan();
         }
     }
@@ -1633,14 +1698,21 @@ Language changes listed by -transition=id:\n\
 
     if (global.params.oneobj)
     {
+        if (modules.dim)
+            obj_start(modules[0]->srcfile->toChars());
         for (size_t i = 0; i < modules.dim; i++)
         {
             m = modules[i];
             if (global.params.verbose)
-                printf("code      %s\n", m->toChars());
-            if (i == 0)
-                obj_start(m->srcfile->toChars());
+                fprintf(global.stdmsg, "code      %s\n", m->toChars());
             m->genobjfile(0);
+            if (entrypoint && m == entrypoint->importedFrom)
+            {
+                char v = global.params.verbose;
+                global.params.verbose = 0;
+                entrypoint->genobjfile(0);
+                global.params.verbose = v;
+            }
             if (!global.errors && global.params.doDocComments)
                 m->gendocfile();
         }
@@ -1655,10 +1727,18 @@ Language changes listed by -transition=id:\n\
         {
             m = modules[i];
             if (global.params.verbose)
-                printf("code      %s\n", m->toChars());
+                fprintf(global.stdmsg, "code      %s\n", m->toChars());
             if (global.params.obj)
-            {   obj_start(m->srcfile->toChars());
+            {
+                obj_start(m->srcfile->toChars());
                 m->genobjfile(global.params.multiobj);
+                if (entrypoint && m == entrypoint->importedFrom)
+                {
+                    char v = global.params.verbose;
+                    global.params.verbose = 0;
+                    entrypoint->genobjfile(global.params.multiobj);
+                    global.params.verbose = v;
+                }
                 obj_end(library, m->objfile);
                 obj_write_deferred(library);
             }

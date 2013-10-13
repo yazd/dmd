@@ -119,7 +119,7 @@ void LibOMF::setFilename(char *dir, char *filename)
 void LibOMF::write()
 {
     if (global.params.verbose)
-        printf("library   %s\n", libfile->name->toChars());
+        fprintf(global.stdmsg, "library   %s\n", libfile->name->toChars());
 
     OutBuffer libbuf;
     WriteLibToBuffer(&libbuf);
@@ -305,7 +305,7 @@ void LibOMF::addObject(const char *module_name, void *buf, size_t buflen)
             this->lib = lib;
             this->pstart = pstart;
             this->pagesize = pagesize;
-            this->firstmodule = false;
+            this->firstmodule = true;
             this->islibrary = islibrary;
             this->module_name = module_name;
         }

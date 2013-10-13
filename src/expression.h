@@ -81,12 +81,11 @@ FuncDeclaration *hasThis(Scope *sc);
 Expression *fromConstInitializer(int result, Expression *e);
 int arrayExpressionCanThrow(Expressions *exps, bool mustNotThrow);
 TemplateDeclaration *getFuncTemplateDecl(Dsymbol *s);
-void valueNoDtor(Expression *e);
+Expression *valueNoDtor(Expression *e);
 int modifyFieldVar(Loc loc, Scope *sc, VarDeclaration *var, Expression *e1);
 #if DMDV2
 Expression *resolveAliasThis(Scope *sc, Expression *e);
-Expression *callCpCtor(Loc loc, Scope *sc, Expression *e, int noscope);
-bool checkPostblit(Loc loc, Type *t);
+Expression *callCpCtor(Scope *sc, Expression *e);
 #endif
 Expression *resolveOpDollar(Scope *sc, ArrayExp *ae);
 Expression *resolveOpDollar(Scope *sc, SliceExp *se);
@@ -167,8 +166,9 @@ public:
     Expression *checkArithmetic();
     void checkDeprecated(Scope *sc, Dsymbol *s);
     void checkPurity(Scope *sc, FuncDeclaration *f);
-    void checkPurity(Scope *sc, VarDeclaration *v, Expression *e1);
+    void checkPurity(Scope *sc, VarDeclaration *v);
     void checkSafety(Scope *sc, FuncDeclaration *f);
+    bool checkPostblit(Scope *sc, Type *t);
     virtual int checkModifiable(Scope *sc, int flag = 0);
     virtual Expression *checkToBoolean(Scope *sc);
     virtual Expression *addDtorHook(Scope *sc);
@@ -472,6 +472,7 @@ public:
 
     Expression *syntaxCopy();
     int apply(apply_fp_t fp, void *param);
+    bool equals(RootObject *o);
     Expression *semantic(Scope *sc);
     int isBool(int result);
     elem *toElem(IRState *irs);
@@ -750,6 +751,7 @@ public:
     TOK tok;
 
     FuncExp(Loc loc, FuncLiteralDeclaration *fd, TemplateDeclaration *td = NULL);
+    void genIdent(Scope *sc);
     Expression *syntaxCopy();
     Expression *semantic(Scope *sc);
     Expression *semantic(Scope *sc, Expressions *arguments);
