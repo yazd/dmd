@@ -13,10 +13,6 @@
 #include <assert.h>
 #include <math.h>
 
-#if __DMC__
-#include <complex.h>
-#endif
-
 #include "lexer.h"
 #include "mtype.h"
 #include "expression.h"
@@ -421,7 +417,7 @@ Expression *PtrExp::optimize(int result, bool keepLvalue)
         Expression *e = expandVar(result, v);
         if (e && e->op == TOKstructliteral)
         {   StructLiteralExp *sle = (StructLiteralExp *)e;
-            e = sle->getField(type, se->offset);
+            e = sle->getField(type, (unsigned)se->offset);
             if (e && e != EXP_CANT_INTERPRET)
                 return e;
         }
@@ -449,7 +445,7 @@ Expression *DotVarExp::optimize(int result, bool keepLvalue)
         VarDeclaration *vf = var->isVarDeclaration();
         if (vf)
         {
-            Expression *e = sle->getField(type, vf->offset);
+            e = sle->getField(type, vf->offset);
             if (e && e != EXP_CANT_INTERPRET)
                 return e;
         }
@@ -489,7 +485,6 @@ Expression *NewExp::optimize(int result, bool keepLvalue)
 Expression *CallExp::optimize(int result, bool keepLvalue)
 {
     //printf("CallExp::optimize(result = %d) %s\n", result, toChars());
-    Expression *e = this;
 
     // Optimize parameters with keeping lvalue-ness
     if (arguments)
@@ -502,9 +497,9 @@ Expression *CallExp::optimize(int result, bool keepLvalue)
         for (size_t i = 0; i < arguments->dim; i++)
         {
             Parameter *p = Parameter::getNth(tf->parameters, i);
-            bool keepLvalue = (p ? (p->storageClass & (STCref | STCout)) != 0 : false);
+            bool keep = (p ? (p->storageClass & (STCref | STCout)) != 0 : false);
             Expression *e = (*arguments)[i];
-            e = e->optimize(WANTvalue, keepLvalue);
+            e = e->optimize(WANTvalue, keep);
             (*arguments)[i] = e;
         }
     }
@@ -513,6 +508,7 @@ Expression *CallExp::optimize(int result, bool keepLvalue)
     if (keepLvalue)
         return this;
 
+    Expression *e = this;
 #if 1
 #else
     if (e1->op == TOKvar)
@@ -1034,7 +1030,7 @@ void setLengthVarIfKnown(VarDeclaration *lengthVar, Expression *arr)
     {
         Type *t = arr->type->toBasetype();
         if (t->ty == Tsarray)
-            len = ((TypeSArray *)t)->dim->toInteger();
+            len = (size_t)((TypeSArray *)t)->dim->toInteger();
         else
             return; // we don't know the length yet
     }

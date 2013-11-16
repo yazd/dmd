@@ -1,6 +1,6 @@
 
 // Compiler implementation of the D programming language
-// Copyright (c) 1999-2012 by Digital Mars
+// Copyright (c) 1999-2013 by Digital Mars
 // All Rights Reserved
 // written by Walter Bright
 // http://www.digitalmars.com
@@ -82,12 +82,12 @@ void unittests();
 
 #define DMDV1   0
 #define DMDV2   1       // Version 2.0 features
-#define SNAN_DEFAULT_INIT DMDV2 // if floats are default initialized to signalling NaN
-#define MODULEINFO_IS_STRUCT DMDV2   // if ModuleInfo is a struct rather than a class
+#define SNAN_DEFAULT_INIT 1 // if floats are default initialized to signalling NaN
+#define MODULEINFO_IS_STRUCT 1   // if ModuleInfo is a struct rather than a class
 #define PULL93  0       // controversial pull #93 for bugzilla 3449
 
 // Set if C++ mangling is done by the front end
-#define CPP_MANGLE (DMDV2 && (TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS))
+#define CPP_MANGLE (TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS)
 
 /* Other targets are TARGET_LINUX, TARGET_OSX, TARGET_FREEBSD, TARGET_OPENBSD and
  * TARGET_SOLARIS, which are
@@ -121,7 +121,7 @@ struct OutBuffer;
 // Can't include arraytypes.h here, need to declare these directly.
 template <typename TYPE> struct Array;
 typedef Array<class Identifier> Identifiers;
-typedef Array<char> Strings;
+typedef Array<const char> Strings;
 
 // Put command line switches in here
 struct Param
@@ -141,7 +141,7 @@ struct Param
     bool alwaysframe;   // always emit standard stack frame
     bool optimize;      // run optimizer
     char map;           // generate linker .map file
-    char is64bit;       // generate 64 bit code
+    bool is64bit;       // generate 64 bit code
     char isLP64;        // generate code for LP64
     char isLinux;       // generate code for linux
     char isOSX;         // generate code for Mac OSX
@@ -178,36 +178,37 @@ struct Param
     char enforcePropertySyntax;
     char betterC;       // be a "better C" compiler; no dependency on D runtime
     bool addMain;       // add a default main() function
+    bool allInst;       // generate code for all template instantiations
 
-    char *argv0;        // program name
+    const char *argv0;    // program name
     Strings *imppath;     // array of char*'s of where to look for import modules
     Strings *fileImppath; // array of char*'s of where to look for file import modules
-    char *objdir;       // .obj/.lib file output directory
-    char *objname;      // .obj file output name
-    char *libname;      // .lib file output name
+    const char *objdir;   // .obj/.lib file output directory
+    const char *objname;  // .obj file output name
+    const char *libname;  // .lib file output name
 
-    char doDocComments; // process embedded documentation comments
-    char *docdir;       // write documentation file to docdir directory
-    char *docname;      // write documentation file to docname
-    Strings *ddocfiles;   // macro include files for Ddoc
+    char doDocComments;  // process embedded documentation comments
+    const char *docdir;  // write documentation file to docdir directory
+    const char *docname; // write documentation file to docname
+    Strings *ddocfiles;  // macro include files for Ddoc
 
-    char doHdrGeneration;       // process embedded documentation comments
-    char *hdrdir;               // write 'header' file to docdir directory
-    char *hdrname;              // write 'header' file to docname
+    char doHdrGeneration;  // process embedded documentation comments
+    const char *hdrdir;    // write 'header' file to docdir directory
+    const char *hdrname;   // write 'header' file to docname
 
-    char doXGeneration;         // write JSON file
-    char *xfilename;            // write JSON file to xfilename
+    char doXGeneration;    // write JSON file
+    const char *xfilename; // write JSON file to xfilename
 
-    unsigned debuglevel;        // debug level
+    unsigned debuglevel;   // debug level
     Strings *debugids;     // debug identifiers
 
-    unsigned versionlevel;      // version level
+    unsigned versionlevel; // version level
     Strings *versionids;   // version identifiers
 
     const char *defaultlibname; // default library for non-debug builds
     const char *debuglibname;   // default library for debug builds
 
-    char *moduleDepsFile;       // filename for deps output
+    const char *moduleDepsFile; // filename for deps output
     OutBuffer *moduleDeps;      // contents to be written to deps file
 
     // Hidden debug switches
@@ -222,16 +223,16 @@ struct Param
 
     char run;           // run resulting executable
     size_t runargs_length;
-    char** runargs;     // arguments for executable
+    const char** runargs; // arguments for executable
 
     // Linker stuff
     Strings *objfiles;
     Strings *linkswitches;
     Strings *libfiles;
-    char *deffile;
-    char *resfile;
-    char *exefile;
-    char *mapfile;
+    const char *deffile;
+    const char *resfile;
+    const char *exefile;
+    const char *mapfile;
 };
 
 struct Compiler
@@ -311,12 +312,7 @@ extern Global global;
 
 #include "longdouble.h"
 
-#ifdef __DMC__
- #include  <complex.h>
- typedef _Complex long double complex_t;
-#else
- #include "complex_t.h"
-#endif
+#include "complex_t.h"
 
 // Be careful not to care about sign when using dinteger_t
 //typedef uint64_t integer_t;
@@ -405,9 +401,7 @@ enum MATCH
 {
     MATCHnomatch,       // no match
     MATCHconvert,       // match with conversions
-#if DMDV2
     MATCHconst,         // match with conversion to const
-#endif
     MATCHexact          // exact match
 };
 
@@ -428,6 +422,8 @@ void vdeprecation(Loc loc, const char *format, va_list ap, const char *p1 = NULL
 
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noreturn))
+#elif _MSC_VER
+__declspec(noreturn)
 #endif
 void fatal();
 

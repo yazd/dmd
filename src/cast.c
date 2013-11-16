@@ -39,45 +39,12 @@ Expression *Expression::implicitCastTo(Scope *sc, Type *t)
     MATCH match = implicitConvTo(t);
     if (match)
     {
-#if DMDV1
-        TY tyfrom = type->toBasetype()->ty;
-        TY tyto = t->toBasetype()->ty;
-        if (global.params.warnings &&
-            Type::impcnvWarn[tyfrom][tyto] &&
-            op != TOKint64)
-        {
-            Expression *e = optimize(WANTflags | WANTvalue);
-
-            if (e->op == TOKint64)
-                return e->implicitCastTo(sc, t);
-            if (tyfrom == Tint32 &&
-                (op == TOKadd || op == TOKmin ||
-                 op == TOKand || op == TOKor || op == TOKxor)
-               )
-            {
-                /* This is really only a semi-kludge fix,
-                 * we really should look at the operands of op
-                 * and see if they are narrower types.
-                 * For example, b=b|b and b=b|7 and s=b+b should be allowed,
-                 * but b=b|i should be an error.
-                 */
-                ;
-            }
-            else
-            {
-                warning("implicit conversion of expression (%s) of type %s to %s can cause loss of data",
-                    toChars(), type->toChars(), t->toChars());
-            }
-        }
-#endif
-#if DMDV2
         if (match == MATCHconst && type->constConv(t))
         {
             Expression *e = copy();
             e->type = t;
             return e;
         }
-#endif
         return castTo(sc, t);
     }
 
@@ -442,7 +409,6 @@ MATCH NullExp::implicitConvTo(Type *t)
     return Expression::implicitConvTo(t);
 }
 
-#if DMDV2
 MATCH StructLiteralExp::implicitConvTo(Type *t)
 {
 #if 0
@@ -471,7 +437,6 @@ MATCH StructLiteralExp::implicitConvTo(Type *t)
     }
     return m;
 }
-#endif
 
 MATCH StringExp::implicitConvTo(Type *t)
 {
@@ -643,6 +608,27 @@ MATCH AssocArrayLiteralExp::implicitConvTo(Type *t)
     }
     else
         return Expression::implicitConvTo(t);
+}
+
+Expression *CallExp::implicitCastTo(Scope *sc, Type *t)
+{
+    //printf("CallExp::implicitCastTo(%s of type %s) => %s\n", toChars(), type->toChars(), t->toChars());
+
+    /* Allow the result of strongly pure functions to
+     * convert to immutable
+     */
+    if (f && f->isolateReturn() &&
+        type->immutableOf()->equals(t->immutableOf()))
+    {
+        /* Avoid emitting CastExp for:
+         *  T[] make() pure { ...  }
+         *  immutable T[] arr = make();  // unique return
+         */
+        Expression *e = copy();
+        e->type = t;
+        return e;
+    }
+    return Expression::implicitCastTo(sc, t);
 }
 
 MATCH CallExp::implicitConvTo(Type *t)
@@ -1025,7 +1011,7 @@ Type *SliceExp::toStaticArrayType()
         Expression *upr = this->upr->optimize(WANTvalue);
         if (lwr->isConst() && upr->isConst())
         {
-            size_t len = upr->toUInteger() - lwr->toUInteger();
+            size_t len = (size_t)(upr->toUInteger() - lwr->toUInteger());
             return TypeSArray::makeType(loc, type->toBasetype()->nextOf(), len);
         }
     }
@@ -1147,7 +1133,7 @@ Expression *Expression::castTo(Scope *sc, Type *t)
             }
             else if (typeb->implicitConvTo(tb) == MATCHconst && t->equals(type->constOf()))
             {
-                Expression *e = copy();
+                e = copy();
                 e->type = t;
                 return e;
             }
@@ -1480,7 +1466,7 @@ L2:
     // See if need to truncate or extend the literal
     if (tb->ty == Tsarray)
     {
-        dinteger_t dim2 = ((TypeSArray *)tb)->dim->toInteger();
+        size_t dim2 = (size_t)((TypeSArray *)tb)->dim->toInteger();
 
         //printf("dim from = %d, to = %d\n", (int)se->len, (int)dim2);
 
@@ -1744,9 +1730,7 @@ Expression *SymOffExp::castTo(Scope *sc, Type *t)
                         e = new SymOffExp(loc, f, 0);
                         e->type = t;
                     }
-#if DMDV2
                     f->tookAddressOf++;
-#endif
                     return e;
                 }
             }
@@ -2700,6 +2684,15 @@ Lcc:
         e2 = e2->castTo(sc, t);
         goto Lagain;
     }
+    else if (t1->ty == Tnull && t2->ty == Tnull)
+    {
+        unsigned char mod = MODmerge(t1->mod, t2->mod);
+
+        t = t1->castMod(mod);
+        e1 = e1->castTo(sc, t);
+        e2 = e2->castTo(sc, t);
+        goto Lret;
+    }
     else if (e1->isArrayOperand() && t1->ty == Tarray &&
              e2->implicitConvTo(t1->nextOf()))
     {   // T[] op T
@@ -2769,6 +2762,8 @@ Expression *BinExp::typeCombine(Scope *sc)
         if (t1->ty == Tstruct && t2->ty == Tstruct)
             goto Lerror;
         else if (t1->ty == Tclass && t2->ty == Tclass)
+            goto Lerror;
+        else if (t1->ty == Taarray && t2->ty == Taarray)
             goto Lerror;
     }
 

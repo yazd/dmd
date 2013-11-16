@@ -105,8 +105,6 @@ enum ENUMTY
 };
 typedef unsigned char TY;       // ENUMTY
 
-#define Tascii Tchar
-
 extern int Tsize_t;
 extern int Tptrdiff_t;
 
@@ -254,13 +252,13 @@ public:
 #if CPP_MANGLE
     virtual void toCppMangle(OutBuffer *buf, CppMangleState *cms);
 #endif
-    virtual int isintegral();
-    virtual int isfloating();   // real, imaginary, or complex
-    virtual int isreal();
-    virtual int isimaginary();
-    virtual int iscomplex();
-    virtual int isscalar();
-    virtual int isunsigned();
+    virtual bool isintegral();
+    virtual bool isfloating();   // real, imaginary, or complex
+    virtual bool isreal();
+    virtual bool isimaginary();
+    virtual bool iscomplex();
+    virtual bool isscalar();
+    virtual bool isunsigned();
     virtual int isscope();
     virtual int isString();
     virtual int isAssignable();
@@ -407,13 +405,13 @@ public:
 #if CPP_MANGLE
     void toCppMangle(OutBuffer *buf, CppMangleState *cms);
 #endif
-    int isintegral();
-    int isfloating();
-    int isreal();
-    int isimaginary();
-    int iscomplex();
-    int isscalar();
-    int isunsigned();
+    bool isintegral();
+    bool isfloating();
+    bool isreal();
+    bool isimaginary();
+    bool iscomplex();
+    bool isscalar();
+    bool isunsigned();
     MATCH implicitConvTo(Type *to);
     Expression *defaultInit(Loc loc);
     int isZeroInit(Loc loc);
@@ -446,10 +444,10 @@ public:
 #if CPP_MANGLE
     void toCppMangle(OutBuffer *buf, CppMangleState *cms);
 #endif
-    int isintegral();
-    int isfloating();
-    int isscalar();
-    int isunsigned();
+    bool isintegral();
+    bool isfloating();
+    bool isscalar();
+    bool isunsigned();
     int checkBoolean();
     MATCH implicitConvTo(Type *to);
     Expression *defaultInit(Loc loc);
@@ -598,7 +596,7 @@ public:
     void toJson(JsonOut *json);
     MATCH implicitConvTo(Type *to);
     MATCH constConv(Type *to);
-    int isscalar();
+    bool isscalar();
     Expression *defaultInit(Loc loc);
     int isZeroInit(Loc loc);
     TypeInfoDeclaration *getTypeInfoDeclaration();
@@ -892,13 +890,13 @@ public:
     void toJson(JsonOut *json);
     Expression *dotExp(Scope *sc, Expression *e, Identifier *ident, int flag);
     Expression *getProperty(Loc loc, Identifier *ident, int flag);
-    int isintegral();
-    int isfloating();
-    int isreal();
-    int isimaginary();
-    int iscomplex();
-    int isscalar();
-    int isunsigned();
+    bool isintegral();
+    bool isfloating();
+    bool isreal();
+    bool isimaginary();
+    bool iscomplex();
+    bool isscalar();
+    bool isunsigned();
     int checkBoolean();
     int isString();
     int isAssignable();
@@ -940,13 +938,13 @@ public:
     Expression *dotExp(Scope *sc, Expression *e, Identifier *ident, int flag);
     structalign_t alignment();
     Expression *getProperty(Loc loc, Identifier *ident, int flag);
-    int isintegral();
-    int isfloating();
-    int isreal();
-    int isimaginary();
-    int iscomplex();
-    int isscalar();
-    int isunsigned();
+    bool isintegral();
+    bool isfloating();
+    bool isreal();
+    bool isimaginary();
+    bool iscomplex();
+    bool isscalar();
+    bool isunsigned();
     int checkBoolean();
     int isAssignable();
     int needsDestruction();
@@ -1062,7 +1060,7 @@ public:
     MATCH implicitConvTo(Type *to);
     int checkBoolean();
 
-    void toCBuffer(OutBuffer *buf, Identifier *ident, HdrGenState *hgs);
+    void toCBuffer2(OutBuffer *buf, HdrGenState *hgs, int mod);
     void toJson(JsonOut *json);
 
     d_uns64 size(Loc loc);
@@ -1102,16 +1100,13 @@ public:
     static int foreach(Parameters *args, ForeachDg dg, void *ctx, size_t *pn=NULL);
 };
 
-extern int Tsize_t;
-extern int Tptrdiff_t;
-
 int arrayTypeCompatible(Loc loc, Type *t1, Type *t2);
 int arrayTypeCompatibleWithoutCasting(Loc loc, Type *t1, Type *t2);
 void MODtoBuffer(OutBuffer *buf, unsigned char mod);
 char *MODtoChars(unsigned char mod);
 int MODimplicitConv(unsigned char modfrom, unsigned char modto);
 int MODmethodConv(unsigned char modfrom, unsigned char modto);
-int MODmerge(unsigned char mod1, unsigned char mod2);
+unsigned char MODmerge(unsigned char mod1, unsigned char mod2);
 void identifierToDocBuffer(Identifier* ident, OutBuffer *buf, HdrGenState *hgs);
 
 #endif /* DMD_MTYPE_H */

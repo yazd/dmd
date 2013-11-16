@@ -153,7 +153,6 @@ ClassDeclaration::ClassDeclaration(Loc loc, Identifier *id, BaseClasses *basecla
                 Type::typeinfotypelist = this;
             }
 
-#if DMDV2
             if (id == Id::TypeInfo_Const)
             {   if (!inObject)
                     error("%s", msg);
@@ -183,7 +182,6 @@ ClassDeclaration::ClassDeclaration(Loc loc, Identifier *id, BaseClasses *basecla
                     error("%s", msg);
                 Type::typeinfovector = this;
             }
-#endif
         }
 
         if (id == Id::Object)
@@ -211,16 +209,8 @@ ClassDeclaration::ClassDeclaration(Loc loc, Identifier *id, BaseClasses *basecla
         }
 
 #if !MODULEINFO_IS_STRUCT
-  #ifdef DMDV2
         if (id == Id::ModuleInfo && !Module::moduleinfo)
             Module::moduleinfo = this;
-  #else
-        if (id == Id::ModuleInfo)
-        {   if (Module::moduleinfo)
-                error("%s", msg);
-            Module::moduleinfo = this;
-        }
-  #endif
 #endif
     }
 
@@ -384,6 +374,17 @@ void ClassDeclaration::semantic(Scope *sc)
                     if (/*doAncestorsSemantic == SemanticIn &&*/ tc->sym->scope)
                         tc->sym->semantic(NULL);
                 }
+
+                if (tc->sym->symtab && tc->sym->scope == NULL)
+                {
+                    /* Bugzilla 11034: Essentailly, class inheritance hierarchy
+                     * and instance size of each classes are orthogonal information.
+                     * Therefore, even if tc->sym->sizeof == SIZEOKnone,
+                     * we need to set baseClass field for class covariance check.
+                     */
+                    baseClass = tc->sym;
+                    b->base = baseClass;
+                }
                 if (!tc->sym->symtab || tc->sym->scope || tc->sym->sizeok == SIZEOKnone)
                 {
                     //printf("%s: forward reference of base class %s\n", toChars(), tc->sym->toChars());
@@ -396,10 +397,6 @@ void ClassDeclaration::semantic(Scope *sc)
                         tc->sym->scope->module->addDeferredSemantic(tc->sym);
                     scope->module->addDeferredSemantic(this);
                     return;
-                }
-                else
-                {   baseClass = tc->sym;
-                    b->base = baseClass;
                 }
              L7: ;
             }
@@ -472,66 +469,65 @@ void ClassDeclaration::semantic(Scope *sc)
         doAncestorsSemantic = SemanticDone;
 
 
-    // If no base class, and this is not an Object, use Object as base class
-    if (!baseClass && ident != Id::Object && !cpp)
-    {
-        if (!object)
-        {
-            error("missing or corrupt object.d");
-            fatal();
-        }
-
-        Type *t = object->type;
-        t = t->semantic(loc, sc)->toBasetype();
-        assert(t->ty == Tclass);
-        TypeClass *tc = (TypeClass *)t;
-
-        BaseClass *b = new BaseClass(tc, PROTpublic);
-        baseclasses->shift(b);
-
-        baseClass = tc->sym;
-        assert(!baseClass->isInterfaceDeclaration());
-        b->base = baseClass;
-    }
-
-    interfaces_dim = baseclasses->dim;
-    interfaces = baseclasses->tdata();
-
-
-    if (baseClass)
-    {
-        if (baseClass->storage_class & STCfinal)
-            error("cannot inherit from final class %s", baseClass->toChars());
-
-        interfaces_dim--;
-        interfaces++;
-
-        // Copy vtbl[] from base class
-        vtbl.setDim(baseClass->vtbl.dim);
-        memcpy(vtbl.tdata(), baseClass->vtbl.tdata(), sizeof(void *) * vtbl.dim);
-
-        // Inherit properties from base class
-        com = baseClass->isCOMclass();
-        if (baseClass->isCPPclass())
-            cpp = 1;
-        isscope = baseClass->isscope;
-        vthis = baseClass->vthis;
-        enclosing = baseClass->enclosing;
-        storage_class |= baseClass->storage_class & STC_TYPECTOR;
-    }
-    else
-    {
-        // No base class, so this is the root of the class hierarchy
-        vtbl.setDim(0);
-        if (vtblOffset())
-            vtbl.push(this);            // leave room for classinfo as first member
-    }
-
-    protection = sc->protection;
-    storage_class |= sc->stc;
-
     if (sizeok == SIZEOKnone)
     {
+        // If no base class, and this is not an Object, use Object as base class
+        if (!baseClass && ident != Id::Object && !cpp)
+        {
+            if (!object)
+            {
+                error("missing or corrupt object.d");
+                fatal();
+            }
+
+            Type *t = object->type;
+            t = t->semantic(loc, sc)->toBasetype();
+            assert(t->ty == Tclass);
+            TypeClass *tc = (TypeClass *)t;
+
+            BaseClass *b = new BaseClass(tc, PROTpublic);
+            baseclasses->shift(b);
+
+            baseClass = tc->sym;
+            assert(!baseClass->isInterfaceDeclaration());
+            b->base = baseClass;
+        }
+
+        interfaces_dim = baseclasses->dim;
+        interfaces = baseclasses->tdata();
+
+        if (baseClass)
+        {
+            if (baseClass->storage_class & STCfinal)
+                error("cannot inherit from final class %s", baseClass->toChars());
+
+            interfaces_dim--;
+            interfaces++;
+
+            // Copy vtbl[] from base class
+            vtbl.setDim(baseClass->vtbl.dim);
+            memcpy(vtbl.tdata(), baseClass->vtbl.tdata(), sizeof(void *) * vtbl.dim);
+
+            // Inherit properties from base class
+            com = baseClass->isCOMclass();
+            if (baseClass->isCPPclass())
+                cpp = 1;
+            isscope = baseClass->isscope;
+            vthis = baseClass->vthis;
+            enclosing = baseClass->enclosing;
+            storage_class |= baseClass->storage_class & STC_TYPECTOR;
+        }
+        else
+        {
+            // No base class, so this is the root of the class hierarchy
+            vtbl.setDim(0);
+            if (vtblOffset())
+                vtbl.push(this);            // leave room for classinfo as first member
+        }
+
+        protection = sc->protection;
+        storage_class |= sc->stc;
+
         interfaceSemantic(sc);
 
         for (size_t i = 0; i < members->dim; i++)
@@ -544,7 +540,8 @@ void ClassDeclaration::semantic(Scope *sc)
          * member which is a pointer to the enclosing scope.
          */
         if (vthis)              // if inheriting from nested class
-        {   // Use the base class's 'this' member
+        {
+            // Use the base class's 'this' member
             if (storage_class & STCstatic)
                 error("static class cannot inherit from nested class %s", baseClass->toChars());
             if (toParent2() != baseClass->toParent2() &&
@@ -570,14 +567,14 @@ void ClassDeclaration::semantic(Scope *sc)
         }
         else
             makeNested();
-    }
 
-    if (storage_class & STCauto)
-        error("storage class 'auto' is invalid when declaring a class, did you mean to use 'scope'?");
-    if (storage_class & STCscope)
-        isscope = 1;
-    if (storage_class & STCabstract)
-        isabstract = 1;
+        if (storage_class & STCauto)
+            error("storage class 'auto' is invalid when declaring a class, did you mean to use 'scope'?");
+        if (storage_class & STCscope)
+            isscope = 1;
+        if (storage_class & STCabstract)
+            isabstract = 1;
+    }
 
     sc = sc->push(this);
     //sc->stc &= ~(STCfinal | STCauto | STCscope | STCstatic | STCabstract | STCdeprecated | STC_TYPECTOR | STCtls | STCgshared);
@@ -585,7 +582,6 @@ void ClassDeclaration::semantic(Scope *sc)
     sc->stc &= STCsafe | STCtrusted | STCsystem;
     sc->parent = this;
     sc->inunion = 0;
-
     if (isCOMclass())
     {
         if (global.params.isWindows)
@@ -600,7 +596,8 @@ void ClassDeclaration::semantic(Scope *sc)
     sc->explicitProtection = 0;
     sc->structalign = STRUCTALIGN_DEFAULT;
     if (baseClass)
-    {   sc->offset = baseClass->structsize;
+    {
+        sc->offset = baseClass->structsize;
         alignsize = baseClass->alignsize;
         sc->offset = (sc->offset + alignsize - 1) & ~(alignsize - 1);
 //      if (enclosing)
@@ -611,7 +608,7 @@ void ClassDeclaration::semantic(Scope *sc)
         if (cpp)
             sc->offset = Target::ptrsize;       // allow room for __vptr
         else
-            sc->offset = Target::ptrsize * 2;  // allow room for __vptr and __monitor
+            sc->offset = Target::ptrsize * 2;   // allow room for __vptr and __monitor
         alignsize = Target::ptrsize;
     }
     sc->userAttributes = NULL;
@@ -643,25 +640,26 @@ void ClassDeclaration::semantic(Scope *sc)
 
     unsigned offset = structsize;
     for (size_t i = 0; i < members->dim; i++)
-    {   Dsymbol *s = (*members)[i];
+    {
+        Dsymbol *s = (*members)[i];
         s->setFieldOffset(this, &offset, false);
     }
     sc->offset = structsize;
 
     if (global.errors != errors)
-    {   // The type is no good.
+    {
+        // The type is no good.
         type = Type::terror;
     }
 
     if (sizeok == SIZEOKfwd)            // failed due to forward references
-    {   // semantic() failed due to forward references
+    {
+        // semantic() failed due to forward references
         // Unwind what we did, and defer it for later
-
         for (size_t i = 0; i < fields.dim; i++)
-        {   Dsymbol *s = fields[i];
-            VarDeclaration *vd = s->isVarDeclaration();
-            if (vd)
-                vd->offset = 0;
+        {
+            if (VarDeclaration *v = fields[i])
+                v->offset = 0;
         }
         fields.setDim(0);
         structsize = 0;
@@ -989,7 +987,6 @@ ClassDeclaration *ClassDeclaration::searchBase(Loc loc, Identifier *ident)
  * Return 1 if function is hidden (not findable through search).
  */
 
-#if DMDV2
 int isf(void *param, Dsymbol *s)
 {
     FuncDeclaration *fd = s->isFuncDeclaration();
@@ -1034,7 +1031,6 @@ int ClassDeclaration::isFuncHidden(FuncDeclaration *fd)
         return !fd->parent->isTemplateMixin();
     }
 }
-#endif
 
 /****************
  * Find virtual function matching identifier and type.
@@ -1162,7 +1158,6 @@ int ClassDeclaration::isCOMinterface()
     return 0;
 }
 
-#if DMDV2
 int ClassDeclaration::isCPPclass()
 {
     return cpp;
@@ -1172,7 +1167,6 @@ int ClassDeclaration::isCPPinterface()
 {
     return 0;
 }
-#endif
 
 
 /****************************************
@@ -1595,12 +1589,10 @@ int InterfaceDeclaration::isCOMinterface()
     return com;
 }
 
-#if DMDV2
 int InterfaceDeclaration::isCPPinterface()
 {
     return cpp;
 }
-#endif
 
 /*******************************************
  */

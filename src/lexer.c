@@ -30,7 +30,7 @@
 #include "id.h"
 #include "module.h"
 
-extern int HtmlNamedEntity(utf8_t *p, size_t length);
+extern int HtmlNamedEntity(const utf8_t *p, size_t length);
 
 #define LS 0x2028       // UTF line separator
 #define PS 0x2029       // UTF paragraph separator
@@ -47,9 +47,9 @@ const int CMoctal =     0x1;
 const int CMhex =       0x2;
 const int CMidchar =    0x4;
 
-inline bool isoctal (utf8_t c) { return cmtable[c] & CMoctal; }
-inline bool ishex   (utf8_t c) { return cmtable[c] & CMhex; }
-inline bool isidchar(utf8_t c) { return cmtable[c] & CMidchar; }
+inline bool isoctal (utf8_t c) { return (cmtable[c] & CMoctal) != 0; }
+inline bool ishex   (utf8_t c) { return (cmtable[c] & CMhex) != 0; }
+inline bool isidchar(utf8_t c) { return (cmtable[c] & CMidchar) != 0; }
 
 static void cmtable_init()
 {
@@ -215,7 +215,7 @@ StringTable Lexer::stringtable;
 OutBuffer Lexer::stringbuffer;
 
 Lexer::Lexer(Module *mod,
-        utf8_t *base, size_t begoffset, size_t endoffset,
+        const utf8_t *base, size_t begoffset, size_t endoffset,
         int doDocComment, int commentToken)
 {
     scanloc = Loc(mod, 1);
@@ -403,7 +403,7 @@ Token *Lexer::peekPastParen(Token *tk)
  *      0       invalid
  */
 
-int Lexer::isValidIdentifier(char *p)
+int Lexer::isValidIdentifier(const char *p)
 {
     size_t len;
     size_t idx;
@@ -497,7 +497,6 @@ void Lexer::scan(Token *t)
                 t->value = hexStringConstant(t);
                 return;
 
-#if DMDV2
             case 'q':
                 if (p[1] == '"')
                 {
@@ -513,7 +512,6 @@ void Lexer::scan(Token *t)
                 }
                 else
                     goto case_ident;
-#endif
 
             case '"':
                 t->value = escapeStringConstant(t,0);
@@ -522,7 +520,7 @@ void Lexer::scan(Token *t)
 #if ! TEXTUAL_ASSEMBLY_OUT
             case '\\':                  // escaped string literal
             {   unsigned c;
-                utf8_t *pstart = p;
+                const utf8_t *pstart = p;
 
                 stringbuffer.reset();
                 do
@@ -549,9 +547,7 @@ void Lexer::scan(Token *t)
                 memcpy(t->ustring, stringbuffer.data, stringbuffer.offset);
                 t->postfix = 0;
                 t->value = TOKstring;
-#if DMDV2
                 error("Escape String literal %.*s is deprecated, use double quoted string literal \"%.*s\" instead", p - pstart, pstart, p - pstart, pstart);
-#endif
                 return;
             }
 #endif
@@ -559,11 +555,7 @@ void Lexer::scan(Token *t)
             case 'a':   case 'b':   case 'c':   case 'd':   case 'e':
             case 'f':   case 'g':   case 'h':   case 'i':   case 'j':
             case 'k':   case 'l':   case 'm':   case 'n':   case 'o':
-#if DMDV2
             case 'p':   /*case 'q': case 'r':*/ case 's':   case 't':
-#else
-            case 'p':   case 'q': /*case 'r':*/ case 's':   case 't':
-#endif
             case 'u':   case 'v':   case 'w': /*case 'x':*/ case 'y':
             case 'z':
             case 'A':   case 'B':   case 'C':   case 'D':   case 'E':
@@ -582,7 +574,7 @@ void Lexer::scan(Token *t)
                     if (isidchar(c))
                         continue;
                     else if (c & 0x80)
-                    {   utf8_t *s = p;
+                    {   const utf8_t *s = p;
                         unsigned u = decodeUTF();
                         if (isUniAlpha(u))
                             continue;
@@ -611,28 +603,15 @@ void Lexer::scan(Token *t)
                     if (!initdone)       // lazy evaluation
                     {
                         initdone = true;
-                        time_t t;
-                        ::time(&t);
-                        char *p = ctime(&t);
+                        time_t ct;
+                        ::time(&ct);
+                        char *p = ctime(&ct);
                         assert(p);
                         sprintf(date, "%.6s %.4s", p + 4, p + 20);
                         sprintf(time, "%.8s", p + 11);
                         sprintf(timestamp, "%.24s", p);
                     }
 
-#if DMDV1
-                    if (mod && id == Id::FILE)
-                    {
-                        t->ustring = (utf8_t *)(loc.filename ? loc.filename : mod->ident->toChars());
-                        goto Lstr;
-                    }
-                    else if (mod && id == Id::LINE)
-                    {
-                        t->value = TOKint64v;
-                        t->uns64value = scanloc.linnum;
-                    }
-                    else
-#endif
                     if (id == Id::DATE)
                     {
                         t->ustring = (utf8_t *)date;
@@ -663,7 +642,7 @@ void Lexer::scan(Token *t)
 
                         for (const char *p = global.version + 1; 1; p++)
                         {
-                            char c = *p;
+                            c = *p;
                             if (isdigit((utf8_t)c))
                                 minor = minor * 10 + c - '0';
                             else if (c == '.')
@@ -680,7 +659,6 @@ void Lexer::scan(Token *t)
                         t->value = TOKint64v;
                         t->uns64value = major * 1000 + minor;
                     }
-#if DMDV2
                     else if (id == Id::EOFX)
                     {
                         t->value = TOKeof;
@@ -688,7 +666,6 @@ void Lexer::scan(Token *t)
                         while (!(*p == 0 || *p == 0x1A))
                             p++;
                     }
-#endif
                 }
                 //printf("t->value = %d\n",t->value);
                 return;
@@ -1083,12 +1060,10 @@ void Lexer::scan(Token *t)
                 {   p++;
                     t->value = TOKequal;            // ==
                 }
-#if DMDV2
                 else if (*p == '>')
                 {   p++;
                     t->value = TOKgoesto;               // =>
                 }
-#endif
                 else
                     t->value = TOKassign;               // =
                 return;
@@ -1103,7 +1078,6 @@ void Lexer::scan(Token *t)
                     t->value = TOKtilde;                // ~
                 return;
 
-#if DMDV2
             case '^':
                 p++;
                 if (*p == '^')
@@ -1122,7 +1096,6 @@ void Lexer::scan(Token *t)
                 else
                     t->value = TOKxor;       // ^
                 return;
-#endif
 
 #define SINGLE(c,tok) case c: p++; t->value = tok; return;
 
@@ -1137,9 +1110,7 @@ void Lexer::scan(Token *t)
             SINGLE(';', TOKsemicolon)
             SINGLE(':', TOKcolon)
             SINGLE('$', TOKdollar)
-#if DMDV2
             SINGLE('@', TOKat)
-#endif
 #undef SINGLE
 
 #define DOUBLE(c1,tok1,c2,tok2)         \
@@ -1155,9 +1126,6 @@ void Lexer::scan(Token *t)
 
             DOUBLE('*', TOKmul, '=', TOKmulass)
             DOUBLE('%', TOKmod, '=', TOKmodass)
-#if DMDV1
-            DOUBLE('^', TOKxor, '=', TOKxorass)
-#endif
 #undef DOUBLE
 
             case '#':
@@ -1247,14 +1215,14 @@ unsigned Lexer::escapeSequence()
         Lhex:
                 p++;
                 c = *p;
-                if (ishex(c))
+                if (ishex((utf8_t)c))
                 {   unsigned v;
 
                     n = 0;
                     v = 0;
                     while (1)
                     {
-                        if (isdigit(c))
+                        if (isdigit((utf8_t)c))
                             c -= '0';
                         else if (islower(c))
                             c -= 'a' - 10;
@@ -1264,7 +1232,7 @@ unsigned Lexer::escapeSequence()
                         c = *++p;
                         if (++n == ndigits)
                             break;
-                        if (!ishex(c))
+                        if (!ishex((utf8_t)c))
                         {   error("escape hex sequence has %d hex digits instead of %d", n, ndigits);
                             break;
                         }
@@ -1280,7 +1248,7 @@ unsigned Lexer::escapeSequence()
                 break;
 
         case '&':                       // named character entity
-                for (utf8_t *idstart = ++p; 1; p++)
+                for (const utf8_t *idstart = ++p; 1; p++)
                 {
                     switch (*p)
                     {
@@ -1310,7 +1278,7 @@ unsigned Lexer::escapeSequence()
                 break;
 
         default:
-                if (isoctal(c))
+                if (isoctal((utf8_t)c))
                 {   unsigned v;
 
                     n = 0;
@@ -1319,7 +1287,7 @@ unsigned Lexer::escapeSequence()
                     {
                         v = v * 8 + (c - '0');
                         c = *++p;
-                    } while (++n < 3 && isoctal(c));
+                    } while (++n < 3 && isoctal((utf8_t)c));
                     c = v;
                     if (c > 0xFF)
                         error("0%03o is larger than a byte", c);
@@ -1478,7 +1446,6 @@ TOK Lexer::hexStringConstant(Token *t)
 }
 
 
-#if DMDV2
 /**************************************
  * Lex delimited strings:
  *      q"(foo(xxx))"   // "foo(xxx)"
@@ -1560,15 +1527,15 @@ TOK Lexer::delimitedStringConstant(Token *t)
                 delimright = '>';
             else if (isalpha(c) || c == '_' || (c >= 0x80 && isUniAlpha(c)))
             {   // Start of identifier; must be a heredoc
-                Token t;
+                Token tok;
                 p--;
-                scan(&t);               // read in heredoc identifier
-                if (t.value != TOKidentifier)
-                {   error("identifier expected for heredoc, not %s", t.toChars());
+                scan(&tok);               // read in heredoc identifier
+                if (tok.value != TOKidentifier)
+                {   error("identifier expected for heredoc, not %s", tok.toChars());
                     delimright = c;
                 }
                 else
-                {   hereid = t.ident;
+                {   hereid = tok.ident;
                     //printf("hereid = '%s'\n", hereid->toChars());
                     blankrol = 1;
                 }
@@ -1577,10 +1544,8 @@ TOK Lexer::delimitedStringConstant(Token *t)
             else
             {   delimright = c;
                 nest = 0;
-#if DMDV2
                 if (isspace(c))
                     error("delimiter cannot be whitespace");
-#endif
             }
         }
         else
@@ -1602,17 +1567,13 @@ TOK Lexer::delimitedStringConstant(Token *t)
             }
             else if (c == delimright)
                 goto Ldone;
-            if (startline && isalpha(c)
-#if DMDV2
-                            && hereid
-#endif
-                           )
-            {   Token t;
-                utf8_t *psave = p;
+            if (startline && isalpha(c) && hereid)
+            {   Token tok;
+                const utf8_t *psave = p;
                 p--;
-                scan(&t);               // read in possible heredoc identifier
-                //printf("endid = '%s'\n", t.ident->toChars());
-                if (t.value == TOKidentifier && t.ident->equals(hereid))
+                scan(&tok);               // read in possible heredoc identifier
+                //printf("endid = '%s'\n", tok.ident->toChars());
+                if (tok.value == TOKidentifier && tok.ident->equals(hereid))
                 {   /* should check that rest of line is blank
                      */
                     goto Ldone;
@@ -1657,7 +1618,7 @@ TOK Lexer::tokenStringConstant(Token *t)
 {
     unsigned nest = 1;
     Loc start = scanloc;
-    utf8_t *pstart = ++p;
+    const utf8_t *pstart = ++p;
 
     while (1)
     {   Token tok;
@@ -1698,7 +1659,6 @@ Lerror:
     return TOKstring;
 }
 
-#endif
 
 
 /**************************************
@@ -1899,7 +1859,7 @@ TOK Lexer::number(Token *t)
     FLAGS flags = FLAGS_decimal;
 
     unsigned c;
-    utf8_t *start;
+    const utf8_t *start;
     TOK result;
 
     //printf("Lexer::number()\n");
@@ -1930,10 +1890,8 @@ TOK Lexer::number(Token *t)
                     case '.':
                         if (p[1] == '.')        // .. is a separate token
                             goto done;
-#if DMDV2
                         if (isalpha(p[1]) || p[1] == '_' || (p[1] & 0x80))
                             goto done;
-#endif
                     case 'i':
                     case 'f':
                     case 'F':
@@ -1972,10 +1930,8 @@ TOK Lexer::number(Token *t)
                     }
                     if (c == '.' && p[1] != '.')
                     {
-#if DMDV2
                         if (isalpha(p[1]) || p[1] == '_' || (p[1] & 0x80))
                             goto done;
-#endif
                         goto real;
                     }
                     else if (c == 'i' || c == 'f' || c == 'F' ||
@@ -1993,7 +1949,7 @@ TOK Lexer::number(Token *t)
 
             case STATE_hex0:            // reading hex number
             case STATE_hex:
-                if (!ishex(c))
+                if (!ishex((utf8_t)c))
                 {
                     if (c == '_')               // ignore embedded _
                     {   p++;
@@ -2012,7 +1968,7 @@ TOK Lexer::number(Token *t)
 
             case STATE_octal:           // reading octal number
             case STATE_octale:          // reading octal number with non-octal digits
-                if (!isoctal(c))
+                if (!isoctal((utf8_t)c))
                 {
                     if (c == '_')               // ignore embedded _
                     {   p++;
@@ -2072,14 +2028,10 @@ done:
         n = stringbuffer.data[0] - '0';
     else
     {
-        // Convert string to integer
-#if __DMC__
-        errno = 0;
-        n = strtoull((char *)stringbuffer.data,NULL,0);
-        if (errno == ERANGE)
-            error("integer overflow");
-#else
-        // Not everybody implements strtoull()
+        /* Convert string to integer
+         * Not everybody implements strtoull()
+         * and besides, we don't want to deal with errno.
+         */
         char *p = (char *)stringbuffer.data;
         int r = 10, d;
 
@@ -2117,7 +2069,7 @@ done:
             n = n2 + d;
             p++;
         }
-#endif
+
         if (sizeof(n) > 8 &&
             n > 0xFFFFFFFFFFFFFFFFULL)  // if n needs more than 64 bits
             error("integer overflow");
@@ -2148,11 +2100,9 @@ done:
         break;
     }
 
-#if DMDV2
     if (state == STATE_octal && n >= 8)
         deprecation("octal literals 0%llo%.*s are deprecated, use std.conv.octal!%llo%.*s instead",
                 n, p - psuffix, psuffix, n, p - psuffix, psuffix);
-#endif
 
     switch (flags)
     {
@@ -2232,35 +2182,15 @@ done:
  */
 
 TOK Lexer::inreal(Token *t)
-#ifdef __DMC__
-__in
-{
-    assert(*p == '.' || isdigit(*p));
-}
-__out (result)
-{
-    switch (result)
-    {
-        case TOKfloat32v:
-        case TOKfloat64v:
-        case TOKfloat80v:
-        case TOKimaginary32v:
-        case TOKimaginary64v:
-        case TOKimaginary80v:
-            break;
-
-        default:
-            assert(0);
-    }
-}
-__body
-#endif /* __DMC__ */
 {   int dblstate;
     unsigned c;
     char hex;                   // is this a hexadecimal-floating-constant?
     TOK result;
 
     //printf("Lexer::inreal()\n");
+#ifdef DEBUG
+    assert(*p == '.' || isdigit(*p));
+#endif
     stringbuffer.reset();
     dblstate = 0;
     hex = 0;
@@ -2389,6 +2319,21 @@ done:
     }
     if (errno == ERANGE)
         error("number is not representable");
+#ifdef DEBUG
+    switch (result)
+    {
+        case TOKfloat32v:
+        case TOKfloat64v:
+        case TOKfloat80v:
+        case TOKimaginary32v:
+        case TOKimaginary64v:
+        case TOKimaginary80v:
+            break;
+
+        default:
+            assert(0);
+    }
+#endif
     return result;
 }
 
@@ -2407,7 +2352,7 @@ void Lexer::poundLine()
 
     scan(&tok);
     if (tok.value == TOKint32v || tok.value == TOKint64v)
-    {   linnum = tok.uns64value - 1;
+    {   linnum = (int)(tok.uns64value - 1);
         if (linnum != tok.uns64value - 1)
             error("line number out of range");
     }
@@ -2517,7 +2462,7 @@ unsigned Lexer::decodeUTF()
 {
     dchar_t u;
     utf8_t c;
-    utf8_t *s = p;
+    const utf8_t *s = p;
     size_t len;
     size_t idx;
     const char *msg;
@@ -2557,9 +2502,9 @@ void Lexer::getDocComment(Token *t, unsigned lineComment)
 
     /* Start of comment text skips over / * *, / + +, or / / /
      */
-    utf8_t *q = t->ptr + 3;      // start of comment text
+    const utf8_t *q = t->ptr + 3;      // start of comment text
 
-    utf8_t *qend = p;
+    const utf8_t *qend = p;
     if (ct == '*' || ct == '+')
         qend -= 2;
 
@@ -2652,7 +2597,7 @@ void Lexer::getDocComment(Token *t, unsigned lineComment)
 
     // It's a line comment if the start of the doc comment comes
     // after other non-whitespace on the same line.
-    utf8_t** dc = (lineComment && anyToken)
+    const utf8_t** dc = (lineComment && anyToken)
                          ? &t->lineComment
                          : &t->blockComment;
 
@@ -2668,11 +2613,11 @@ void Lexer::getDocComment(Token *t, unsigned lineComment)
  * separated by a newline.
  */
 
-utf8_t *Lexer::combineComments(utf8_t *c1, utf8_t *c2)
+const utf8_t *Lexer::combineComments(const utf8_t *c1, const utf8_t *c2)
 {
     //printf("Lexer::combineComments('%s', '%s')\n", c1, c2);
 
-    utf8_t *c = c2;
+    const utf8_t *c = c2;
 
     if (c1)
     {   c = c1;
@@ -2680,14 +2625,15 @@ utf8_t *Lexer::combineComments(utf8_t *c1, utf8_t *c2)
         {   size_t len1 = strlen((char *)c1);
             size_t len2 = strlen((char *)c2);
 
-            c = (utf8_t *)mem.malloc(len1 + 1 + len2 + 1);
-            memcpy(c, c1, len1);
+            utf8_t *p = (utf8_t *)mem.malloc(len1 + 1 + len2 + 1);
+            memcpy(p, c1, len1);
             if (len1 && c1[len1 - 1] != '\n')
-            {   c[len1] = '\n';
+            {   p[len1] = '\n';
                 len1++;
             }
-            memcpy(c + len1, c2, len2);
-            c[len1 + len2] = 0;
+            memcpy(p + len1, c2, len2);
+            p[len1 + len2] = 0;
+            c = p;
         }
     }
     return c;
@@ -2854,7 +2800,7 @@ static Keyword keywords[] =
     {   "__parameters", TOKparameters   },
     {   "ref",          TOKref          },
     {   "macro",        TOKmacro        },
-#if DMDV2
+
     {   "pure",         TOKpure         },
     {   "nothrow",      TOKnothrow      },
     {   "__gshared",    TOKgshared      },
@@ -2868,7 +2814,6 @@ static Keyword keywords[] =
     {   "__PRETTY_FUNCTION__", TOKprettyfunc   },
     {   "shared",       TOKshared       },
     {   "immutable",    TOKimmutable    },
-#endif
 };
 
 int Token::isKeyword()
@@ -2916,9 +2861,7 @@ void Lexer::initKeywords()
     Token::tochars[TOKxorass]           = "^=";
     Token::tochars[TOKassign]           = "=";
     Token::tochars[TOKconstruct]        = "=";
-#if DMDV2
     Token::tochars[TOKblit]             = "=";
-#endif
     Token::tochars[TOKlt]               = "<";
     Token::tochars[TOKgt]               = ">";
     Token::tochars[TOKle]               = "<=";
@@ -2987,13 +2930,11 @@ void Lexer::initKeywords()
 
     Token::tochars[TOKorass]            = "|=";
     Token::tochars[TOKidentifier]       = "identifier";
-#if DMDV2
     Token::tochars[TOKat]               = "@";
     Token::tochars[TOKpow]              = "^^";
     Token::tochars[TOKpowass]           = "^^=";
     Token::tochars[TOKgoesto]           = "=>";
     Token::tochars[TOKpound]            = "#";
-#endif
 
      // For debugging
     Token::tochars[TOKerror]            = "error";

@@ -204,7 +204,7 @@ void AttribDeclaration::inlineScan()
     }
 }
 
-void AttribDeclaration::addComment(utf8_t *comment)
+void AttribDeclaration::addComment(const utf8_t *comment)
 {
     //printf("AttribDeclaration::addComment %s\n", comment);
     if (comment)
@@ -494,11 +494,11 @@ const char *StorageClassDeclaration::stcToChars(char tmp[], StorageClass& stc)
         { STCalias,        TOKalias },
         { STCout,          TOKout },
         { STCin,           TOKin },
-#if DMDV2
         { STCmanifest,     TOKenum },
         { STCimmutable,    TOKimmutable },
         { STCshared,       TOKshared },
         { STCnothrow,      TOKnothrow },
+        { STCwild,         TOKwild },
         { STCpure,         TOKpure },
         { STCref,          TOKref },
         { STCtls },
@@ -508,7 +508,6 @@ const char *StorageClassDeclaration::stcToChars(char tmp[], StorageClass& stc)
         { STCtrusted,      TOKat,       "trusted" },
         { STCsystem,       TOKat,       "system" },
         { STCdisable,      TOKat,       "disable" },
-#endif
     };
 
     for (int i = 0; i < sizeof(table)/sizeof(table[0]); i++)
@@ -522,7 +521,6 @@ const char *StorageClassDeclaration::stcToChars(char tmp[], StorageClass& stc)
                 return "__thread";
 
             TOK tok = table[i].tok;
-#if DMDV2
             if (tok == TOKat)
             {
                 tmp[0] = '@';
@@ -530,7 +528,6 @@ const char *StorageClassDeclaration::stcToChars(char tmp[], StorageClass& stc)
                 return tmp;
             }
             else
-#endif
                 return Token::toChars(tok);
         }
     }
@@ -1068,7 +1065,6 @@ void PragmaDeclaration::semantic(Scope *sc)
         }
         goto Lnodecl;
     }
-#if DMDV2
     else if (ident == Id::startaddress)
     {
         if (!args || args->dim != 1)
@@ -1090,7 +1086,6 @@ void PragmaDeclaration::semantic(Scope *sc)
         }
         goto Lnodecl;
     }
-#endif
     else if (ident == Id::mangle)
     {
         if (!args || args->dim != 1)
@@ -1355,7 +1350,7 @@ void ConditionalDeclaration::importAll(Scope *sc)
     }
 }
 
-void ConditionalDeclaration::addComment(utf8_t *comment)
+void ConditionalDeclaration::addComment(const utf8_t *comment)
 {
     /* Because addComment is called by the parser, if we called
      * include() it would define a version before it was used.

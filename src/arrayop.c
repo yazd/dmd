@@ -246,23 +246,12 @@ ArrayOp *buildArrayOp(Identifier *ident, BinExp *exp, Scope *sc, Loc loc)
      */
 
     Parameter *p = (*fparams)[0 /*fparams->dim - 1*/];
-#if DMDV1
-    // for (size_t i = 0; i < p.length; i++)
-    Initializer *init = new ExpInitializer(0, new IntegerExp(0, 0, Type::tsize_t));
-    Dsymbol *d = new VarDeclaration(0, Type::tsize_t, Id::p, init);
-    Statement *s1 = new ForStatement(0,
-        new ExpStatement(0, d),
-        new CmpExp(TOKlt, 0, new IdentifierExp(0, Id::p), new ArrayLengthExp(0, new IdentifierExp(0, p->ident))),
-        new PostExp(TOKplusplus, 0, new IdentifierExp(0, Id::p)),
-        new ExpStatement(0, loopbody));
-#else
     // foreach (i; 0 .. p.length)
     Statement *s1 = new ForeachRangeStatement(Loc(), TOKforeach,
         new Parameter(0, NULL, Id::p, NULL),
         new IntegerExp(Loc(), 0, Type::tsize_t),
         new ArrayLengthExp(Loc(), new IdentifierExp(Loc(), p->ident)),
         new ExpStatement(Loc(), loopbody));
-#endif
     //printf("%s\n", s1->toChars());
     Statement *s2 = new ReturnStatement(Loc(), new IdentifierExp(Loc(), p->ident));
     //printf("s2: %s\n", s2->toChars());
@@ -309,6 +298,13 @@ bool isArrayOpValid(Expression *e)
 {
     if (e->op == TOKslice)
         return true;
+    if (e->op == TOKarrayliteral)
+    {
+        Type *t = e->type->toBasetype();
+        while (t->ty == Tarray || t->ty == Tsarray)
+            t = t->nextOf()->toBasetype();
+        return (t->ty != Tvoid);
+    }
     Type *tb = e->type->toBasetype();
 
     if ( (tb->ty == Tarray) || (tb->ty == Tsarray) )
@@ -332,10 +328,8 @@ bool isArrayOpValid(Expression *e)
             case TOKxorass:
             case TOKandass:
             case TOKorass:
-#if DMDV2
             case TOKpow:
             case TOKpowass:
-#endif
                  return isArrayOpValid(((BinExp *)e)->e1) && isArrayOpValid(((BinExp *)e)->e2);
 
             case TOKcall:
@@ -362,9 +356,15 @@ Expression *BinExp::arrayOp(Scope *sc)
 
     Type *tb = type->toBasetype();
     assert(tb->ty == Tarray || tb->ty == Tsarray);
-    if (tb->nextOf()->toBasetype()->ty == Tvoid)
+    Type *tbn = tb->nextOf()->toBasetype();
+    if (tbn->ty == Tvoid)
     {
         error("Cannot perform array operations on void[] arrays");
+        return new ErrorExp();
+    }
+    if (!tbn->isscalar())
+    {
+        error("'%s' each element is not a scalar, it is a %s", toChars(), tbn->toChars());
         return new ErrorExp();
     }
 
@@ -387,11 +387,7 @@ Expression *BinExp::arrayOp(Scope *sc)
 
     /* Append deco of array element type
      */
-#if DMDV2
     buf.writestring(type->toBasetype()->nextOf()->toBasetype()->mutableOf()->deco);
-#else
-    buf.writestring(type->toBasetype()->nextOf()->toBasetype()->deco);
-#endif
 
     buf.writeByte(0);
     char *name = buf.toChars();
@@ -451,6 +447,12 @@ void CastExp::buildArrayIdent(OutBuffer *buf, Expressions *arguments)
         Expression::buildArrayIdent(buf, arguments);
 }
 
+void ArrayLiteralExp::buildArrayIdent(OutBuffer *buf, Expressions *arguments)
+{
+    buf->writestring("Slice");
+    arguments->shift(this);
+}
+
 void SliceExp::buildArrayIdent(OutBuffer *buf, Expressions *arguments)
 {
     buf->writestring("Slice");
@@ -483,9 +485,7 @@ void BinAssignExp::buildArrayIdent(OutBuffer *buf, Expressions *arguments)
     case TOKxorass: s = "Xorass"; break;
     case TOKandass: s = "Andass"; break;
     case TOKorass:  s = "Orass";  break;
-#if DMDV2
     case TOKpowass: s = "Powass"; break;
-#endif
     default: assert(0);
     }
     buf->writestring(s);
@@ -518,9 +518,7 @@ void BinExp::buildArrayIdent(OutBuffer *buf, Expressions *arguments)
     case TOKxor: s = "Xor"; break;
     case TOKand: s = "And"; break;
     case TOKor:  s = "Or";  break;
-#if DMDV2
     case TOKpow: s = "Pow"; break;
-#endif
     default: break;
     }
     if (s)
@@ -558,6 +556,19 @@ Expression *CastExp::buildArrayLoop(Parameters *fparams)
         return Expression::buildArrayLoop(fparams);
 }
 
+Expression *ArrayLiteralExp::buildArrayLoop(Parameters *fparams)
+{
+    Identifier *id = Identifier::generateId("p", fparams->dim);
+    Parameter *param = new Parameter(STCconst, type, id, NULL);
+    fparams->shift(param);
+    Expression *e = new IdentifierExp(Loc(), id);
+    Expressions *arguments = new Expressions();
+    Expression *index = new IdentifierExp(Loc(), Id::p);
+    arguments->push(index);
+    e = new ArrayExp(Loc(), e, arguments);
+    return e;
+}
+
 Expression *SliceExp::buildArrayLoop(Parameters *fparams)
 {
     Identifier *id = Identifier::generateId("p", fparams->dim);
@@ -576,14 +587,12 @@ Expression *AssignExp::buildArrayLoop(Parameters *fparams)
     /* Evaluate assign expressions right to left
      */
     Expression *ex2 = e2->buildArrayLoop(fparams);
-#if DMDV2
     /* Need the cast because:
      *   b = c + p[i];
      * where b is a byte fails because (c + p[i]) is an int
      * which cannot be implicitly cast to byte.
      */
     ex2 = new CastExp(Loc(), ex2, e1->type->nextOf());
-#endif
     Expression *ex1 = e1->buildArrayLoop(fparams);
     Parameter *param = (*fparams)[0];
     param->storageClass = 0;
@@ -610,9 +619,7 @@ Expression *BinAssignExp::buildArrayLoop(Parameters *fparams)
     case TOKxorass: return new XorAssignExp(loc, ex1, ex2);
     case TOKandass: return new AndAssignExp(loc, ex1, ex2);
     case TOKorass:  return new OrAssignExp(loc, ex1, ex2);
-#if DMDV2
     case TOKpowass: return new PowAssignExp(loc, ex1, ex2);
-#endif
     default:
         assert(0);
         return NULL;
@@ -645,9 +652,7 @@ Expression *BinExp::buildArrayLoop(Parameters *fparams)
     case TOKxor:
     case TOKand:
     case TOKor:
-#if DMDV2
     case TOKpow:
-#endif
     {
         /* Evaluate assign expressions left to right
          */
@@ -671,6 +676,13 @@ int Expression::isArrayOperand()
     //printf("Expression::isArrayOperand() %s\n", toChars());
     if (op == TOKslice)
         return 1;
+    if (op == TOKarrayliteral)
+    {
+        Type *t = type->toBasetype();
+        while (t->ty == Tarray || t->ty == Tsarray)
+            t = t->nextOf()->toBasetype();
+        return (t->ty != Tvoid);
+    }
     if (type->toBasetype()->ty == Tarray)
     {
         switch (op)
@@ -692,10 +704,8 @@ int Expression::isArrayOperand()
             case TOKxorass:
             case TOKandass:
             case TOKorass:
-#if DMDV2
             case TOKpow:
             case TOKpowass:
-#endif
             case TOKneg:
             case TOKtilde:
                 return 1;

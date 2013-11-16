@@ -613,12 +613,12 @@ Statement *CompoundStatement::semantic(Scope *sc)
     {
         s = (*statements)[i];
         if (s)
-        {   Statements *a = s->flatten(sc);
+        {   Statements *flt = s->flatten(sc);
 
-            if (a)
+            if (flt)
             {
                 statements->remove(i);
-                statements->insert(i, a);
+                statements->insert(i, flt);
                 continue;
             }
             s = s->semantic(sc);
@@ -882,12 +882,10 @@ void CompoundDeclarationStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
                 if (v->init)
                 {   buf->writestring(" = ");
-#if DMDV2
                     ExpInitializer *ie = v->init->isExpInitializer();
                     if (ie && (ie->exp->op == TOKconstruct || ie->exp->op == TOKblit))
                         ((AssignExp *)ie->exp)->e2->toCBuffer(buf, hgs);
                     else
-#endif
                         v->init->toCBuffer(buf, hgs);
                 }
             }
@@ -928,7 +926,6 @@ Statement *UnrolledLoopStatement::semantic(Scope *sc)
 {
     //printf("UnrolledLoopStatement::semantic(this = %p, sc = %p)\n", this, sc);
 
-    sc->noctor++;
     Scope *scd = sc->push();
     scd->sbreak = this;
     scd->scontinue = this;
@@ -948,7 +945,6 @@ Statement *UnrolledLoopStatement::semantic(Scope *sc)
     }
 
     scd->pop();
-    sc->noctor--;
     return serror ? serror : this;
 }
 
@@ -1014,6 +1010,12 @@ Statement *ScopeStatement::syntaxCopy()
     return s;
 }
 
+ReturnStatement *ScopeStatement::isReturnStatement()
+{
+    if (statement)
+        return statement->isReturnStatement();
+    return NULL;
+}
 
 Statement *ScopeStatement::semantic(Scope *sc)
 {   ScopeDsymbol *sym;
@@ -1545,23 +1547,23 @@ Statement *ForeachStatement::semantic(Scope *sc)
             Dsymbol *var;
             if (te)
             {   Type *tb = e->type->toBasetype();
-                Dsymbol *s = NULL;
+                Dsymbol *ds = NULL;
                 if ((tb->ty == Tfunction || tb->ty == Tsarray) && e->op == TOKvar)
-                    s = ((VarExp *)e)->var;
+                    ds = ((VarExp *)e)->var;
                 else if (e->op == TOKtemplate)
-                    s =((TemplateExp *)e)->td;
+                    ds =((TemplateExp *)e)->td;
                 else if (e->op == TOKimport)
-                    s =((ScopeExp *)e)->sds;
+                    ds =((ScopeExp *)e)->sds;
 
-                if (s)
+                if (ds)
                 {
-                    var = new AliasDeclaration(loc, arg->ident, s);
+                    var = new AliasDeclaration(loc, arg->ident, ds);
                     if (arg->storageClass & STCref)
                     {   error("symbol %s cannot be ref", s->toChars());
                         goto Lerror;
                     }
                     if (argtype)
-                    {   error("cannot specify element type for symbol %s", s->toChars());
+                    {   error("cannot specify element type for symbol %s", ds->toChars());
                         goto Lerror;
                     }
                 }
@@ -1788,8 +1790,8 @@ Lagain:
                 }
                 else
                 {
-                    ExpInitializer *ie = new ExpInitializer(loc, new IdentifierExp(loc, key->ident));
-                    VarDeclaration *v = new VarDeclaration(loc, arg->type, arg->ident, ie);
+                    ExpInitializer *ei = new ExpInitializer(loc, new IdentifierExp(loc, key->ident));
+                    VarDeclaration *v = new VarDeclaration(loc, arg->type, arg->ident, ei);
                     v->storage_class |= STCforeach | (arg->storageClass & STCref);
                     body = new CompoundStatement(loc, new ExpStatement(loc, v), body);
                 }
@@ -1853,7 +1855,6 @@ Lagain:
 
         case Tclass:
         case Tstruct:
-#if DMDV2
             /* Prefer using opApply, if it exists
              */
             if (sapply)
@@ -1887,8 +1888,8 @@ Lagain:
 
             /* Generate a temporary __r and initialize it with the aggregate.
              */
-            Identifier *id = Identifier::generateId("__r");
-            VarDeclaration *r = new VarDeclaration(loc, NULL, id, new ExpInitializer(loc, aggr));
+            Identifier *rid = Identifier::generateId("__r");
+            VarDeclaration *r = new VarDeclaration(loc, NULL, rid, new ExpInitializer(loc, aggr));
             Statement *init = new ExpStatement(loc, r);
 
             // !__r.empty
@@ -1923,8 +1924,7 @@ Lagain:
                 VarDeclaration *vd = new VarDeclaration(loc, NULL, id, ei);
                 vd->storage_class |= STCctfe | STCref | STCforeach;
 
-                Expression *de = new DeclarationExp(loc, vd);
-                makeargs = new ExpStatement(loc, de);
+                makeargs = new ExpStatement(loc, new DeclarationExp(loc, vd));
 
                 Expression *ve = new VarExp(loc, vd);
                 ve->type = sfront->isDeclaration()->type;
@@ -1957,10 +1957,11 @@ Lagain:
                             arg->type ? arg->type->toChars() : "?", arg->ident->toChars(),
                             exp->type->toChars(), exp->toChars());
                 #endif
-                    if (arg->type && !exp->implicitConvTo(arg->type))
-                        goto Lrangeerr;
                     if (!arg->type)
                         arg->type = exp->type;
+                    arg->type = arg->type->addStorageClass(arg->storageClass);
+                    if (!exp->implicitConvTo(arg->type))
+                        goto Lrangeerr;
 
                     VarDeclaration *var = new VarDeclaration(loc, arg->type, arg->ident, new ExpInitializer(loc, exp));
                     var->storage_class |= STCctfe | STCref | STCforeach;
@@ -1989,7 +1990,6 @@ Lagain:
             error("cannot infer argument types");
             goto Lerror2;
         }
-#endif
         case Tdelegate:
         Lapply:
         {
@@ -2119,7 +2119,7 @@ Lagain:
 
                 unsigned char i = dim == 2;
                 if (!fdapply[i]) {
-                    Parameters* args = new Parameters;
+                    args = new Parameters;
                     args->push(new Parameter(STCin, Type::tvoid->pointerTo(), NULL, NULL));
                     args->push(new Parameter(STCin, Type::tsize_t, NULL, NULL));
                     Parameters* dgargs = new Parameters;
@@ -2134,7 +2134,7 @@ Lagain:
                 ec = new VarExp(Loc(), fdapply[i]);
                 Expressions *exps = new Expressions();
                 exps->push(aggr);
-                size_t keysize = taa->index->size();
+                size_t keysize = (size_t)taa->index->size();
                 keysize = (keysize + ((size_t)Target::ptrsize-1)) & ~((size_t)Target::ptrsize-1);
                 // paint delegate argument to the type runtime expects
                 if (!fldeTy[i]->equals(flde->type)) {
@@ -2179,7 +2179,7 @@ Lagain:
 
                 FuncDeclaration *fdapply;
                 TypeDelegate *dgty;
-                Parameters* args = new Parameters;
+                args = new Parameters;
                 args->push(new Parameter(STCin, tn->arrayOf(), NULL, NULL));
                 Parameters* dgargs = new Parameters;
                 dgargs->push(new Parameter(STCin, Type::tvoidptr, NULL, NULL));
@@ -2227,26 +2227,11 @@ Lagain:
                 assert(tab->ty == Tstruct || tab->ty == Tclass);
                 Expressions *exps = new Expressions();
                 assert(sapply);
-#if 0
-                TemplateDeclaration *td;
-                if (sapply &&
-                    (td = sapply->isTemplateDeclaration()) != NULL)
-                {   /* Call:
-                     *  aggr.apply!(fld)()
-                     */
-                    Objects *tiargs = new Objects();
-                    tiargs->push(fld);
-                    ec = new DotTemplateInstanceExp(loc, aggr, sapply->ident, tiargs);
-                }
-                else
-#endif
-                {
-                    /* Call:
-                     *  aggr.apply(flde)
-                     */
-                    ec = new DotIdExp(loc, aggr, sapply->ident);
-                    exps->push(flde);
-                }
+                /* Call:
+                 *  aggr.apply(flde)
+                 */
+                ec = new DotIdExp(loc, aggr, sapply->ident);
+                exps->push(flde);
                 e = new CallExp(loc, ec, exps);
                 e = e->semantic(sc);
                 if (e->type != Type::tint32)
@@ -2367,7 +2352,6 @@ void ForeachStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
 /**************************** ForeachRangeStatement ***************************/
 
-#if DMDV2
 
 ForeachRangeStatement::ForeachRangeStatement(Loc loc, TOK op, Parameter *arg,
         Expression *lwr, Expression *upr, Statement *body)
@@ -2576,7 +2560,6 @@ void ForeachRangeStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
     buf->writenl();
 }
 
-#endif
 
 /******************************** IfStatement ***************************/
 
@@ -2610,6 +2593,8 @@ Statement *IfStatement::semantic(Scope *sc)
     // Evaluate at runtime
     unsigned cs0 = sc->callSuper;
     unsigned cs1;
+    unsigned *fi0 = sc->saveFieldInit();
+    unsigned *fi1 = NULL;
 
     ScopeDsymbol *sym = new ScopeDsymbol();
     sym->parent = sc->scopesym;
@@ -2656,10 +2641,13 @@ Statement *IfStatement::semantic(Scope *sc)
     scd->pop();
 
     cs1 = sc->callSuper;
+    fi1 = sc->fieldinit;
     sc->callSuper = cs0;
+    sc->fieldinit = fi0;
     if (elsebody)
         elsebody = elsebody->semanticScope(sc, NULL, NULL);
     sc->mergeCallSuper(loc, cs1);
+    sc->mergeFieldInit(loc, fi1);
 
     if (condition->op == TOKerror ||
         (ifbody && ifbody->isErrorStatement()) ||
@@ -2934,7 +2922,6 @@ Statement *PragmaStatement::semantic(Scope *sc)
         }
 #endif
     }
-#if DMDV2
     else if (ident == Id::startaddress)
     {
         if (!args || args->dim != 1)
@@ -2960,7 +2947,6 @@ Statement *PragmaStatement::semantic(Scope *sc)
             return this;
         }
     }
-#endif
     else
         error("unrecognized pragma(%s)", ident->toChars());
 Lerror:
@@ -3140,7 +3126,6 @@ Statement *SwitchStatement::semantic(Scope *sc)
     }
 
     bool needswitcherror = FALSE;
-#if DMDV2
     if (isFinal)
     {   Type *t = condition->type;
         while (t && t->ty == Ttypedef)
@@ -3178,7 +3163,6 @@ Statement *SwitchStatement::semantic(Scope *sc)
         else
             needswitcherror = TRUE;
     }
-#endif
 
     if (!sc->sw->sdefault && (!isFinal || needswitcherror || global.params.useAssert))
     {   hasNoDefault = 1;
@@ -3377,7 +3361,6 @@ void CaseStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
 /******************************** CaseRangeStatement ***************************/
 
-#if DMDV2
 
 CaseRangeStatement::CaseRangeStatement(Loc loc, Expression *first,
         Expression *last, Statement *s)
@@ -3478,7 +3461,6 @@ void CaseRangeStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
     statement->toCBuffer(buf, hgs);
 }
 
-#endif
 
 /******************************** DefaultStatement ***************************/
 
@@ -3670,8 +3652,6 @@ Statement *ReturnStatement::semantic(Scope *sc)
 
     TypeFunction *tf = (TypeFunction *)fd->type;
     assert(tf->ty == Tfunction);
-    bool isRefReturn = tf->isref && !(fd->storage_class & STCauto);
-    // Until 'ref' deduction finished, 'auto ref' is treated as a 'value return'.
 
     Type *tret = tf->next;
     if (fd->tintro)
@@ -3718,21 +3698,43 @@ Statement *ReturnStatement::semantic(Scope *sc)
             exp = exp->inferType(fld->treq->nextOf()->nextOf());
         exp = exp->semantic(sc);
         exp = resolveProperties(sc, exp);
-        // Until 'ref' deduction finished, don't invoke constant folding
-        if (!tf->isref)
-            exp = exp->optimize(WANTvalue);
 
         if (Expression *e = exp->isTemp())
             exp = e;                // don't need temporary
         if (exp->op == TOKcall)
             exp = valueNoDtor(exp);
 
+        // deduce 'auto ref'
+        if (tf->isref && (fd->storage_class & STCauto))
+        {
+            /* Determine "refness" of function return:
+             * if it's an lvalue, return by ref, else return by value
+             */
+            if (exp->isLvalue())
+            {
+                /* Return by ref
+                 * (but first ensure it doesn't fail the "check for
+                 * escaping reference" test)
+                 */
+                unsigned errors = global.startGagging();
+                exp->checkEscapeRef();
+                if (global.endGagging(errors))
+                    tf->isref = false;  // return by value
+            }
+            else
+                tf->isref = false;      // return by value
+            fd->storage_class &= ~STCauto;
+        }
+        if (!tf->isref)
+            exp = exp->optimize(WANTvalue);
+
+        // handle NRVO
         if (fd->nrvo_can && exp->op == TOKvar)
         {
             VarExp *ve = (VarExp *)exp;
             VarDeclaration *v = ve->var->isVarDeclaration();
 
-            if (isRefReturn)
+            if (tf->isref)
                 // Function returns a reference
                 fd->nrvo_can = 0;
             else if (!v || v->isOut() || v->isRef())
@@ -3753,6 +3755,7 @@ Statement *ReturnStatement::semantic(Scope *sc)
         else
             fd->nrvo_can = 0;
 
+        // infer return type
         if (fd->inferRetType)
         {
             Type *tfret = tf->nextOf();
@@ -3786,46 +3789,16 @@ Statement *ReturnStatement::semantic(Scope *sc)
                  */
             }
             else
-            {
-                if (tf->isref && (fd->storage_class & STCauto))
-                {   /* Determine "refness" of function return:
-                     * if it's an lvalue, return by ref, else return by value
-                     */
-                    if (exp->isLvalue())
-                    {
-                        /* Return by ref
-                         * (but first ensure it doesn't fail the "check for
-                         * escaping reference" test)
-                         */
-                        unsigned errors = global.startGagging();
-                        exp->checkEscapeRef();
-                        if (global.endGagging(errors))
-                            tf->isref = false;  // return by value
-                    }
-                    else
-                        tf->isref = false;      // return by value
-                    fd->storage_class &= ~STCauto;
-
-                    isRefReturn = tf->isref;    // 'ref' deduction finished
-                    if (!isRefReturn)
-                        exp = exp->optimize(WANTvalue);
-                }
                 tf->next = exp->type;
-                //fd->type = tf->semantic(loc, sc);     // Removed with 6902
-                if (!fd->tintro)
-                {
-                    tret = tf->next;
-                    tbret = tret->toBasetype();
-                }
-            }
-            if (fd->returnLabel)
-                eorg = exp->copy();
 
-            if (!fd->returns)
-                fd->returns = new ReturnStatements();
-            fd->returns->push(this);
+            if (!fd->tintro)
+            {
+                tret = tf->next;
+                tbret = tret->toBasetype();
+            }
         }
-        else if (tbret->ty != Tvoid)
+
+        if (tbret->ty != Tvoid)
         {
             if (!exp->type->implicitConvTo(tret) &&
                 fd->parametersIntersect(exp->type))
@@ -3843,7 +3816,7 @@ Statement *ReturnStatement::semantic(Scope *sc)
                 eorg = exp->copy();
             exp = exp->implicitCastTo(sc, tret);
 
-            if (!isRefReturn)
+            if (!tf->isref)
                 exp = exp->optimize(WANTvalue);
 
             if (!fd->returns)
@@ -3859,15 +3832,10 @@ Statement *ReturnStatement::semantic(Scope *sc)
                 error("mismatched function return type inference of void and %s",
                     tf->next->toChars());
         }
-        else
-        {
-            tf->next = Type::tvoid;
-            //fd->type = fd->type->semantic(loc, sc);   // Remove with7321, same as 6902
-            if (!fd->tintro)
-            {   tret = Type::tvoid;
-                tbret = tret;
-            }
-        }
+        tf->next = Type::tvoid;
+
+        tret = Type::tvoid;
+        tbret = tret;
     }
     else if (tbret->ty != Tvoid)        // if non-void return
         error("return expression expected");
@@ -3903,14 +3871,15 @@ Statement *ReturnStatement::semantic(Scope *sc)
         {
             // Construct: return vresult;
             if (!fd->vresult)
-            {   // Declare vresult
+            {
+                // Declare vresult
                 Scope *sco = fd->scout ? fd->scout : scx;
                 if (!fd->outId)
                     fd->outId = Id::result;
                 VarDeclaration *v = new VarDeclaration(loc, tret, fd->outId, NULL);
                 v->noscope = 1;
                 v->storage_class |= STCresult;
-                if (isRefReturn)
+                if (tf->isref)
                     v->storage_class |= STCref | STCforeach;
                 v->semantic(sco);
                 if (!sco->insert(v))
@@ -3934,8 +3903,9 @@ Statement *ReturnStatement::semantic(Scope *sc)
 
     if (exp)
     {
-        if (isRefReturn && !fd->isCtorDeclaration())
-        {   // Function returns a reference
+        if (tf->isref && !fd->isCtorDeclaration())
+        {
+            // Function returns a reference
             exp = exp->toLvalue(sc, exp);
             exp->checkEscapeRef();
         }
@@ -3961,8 +3931,23 @@ Statement *ReturnStatement::semantic(Scope *sc)
     if (sc->callSuper & CSXany_ctor &&
         !(sc->callSuper & (CSXthis_ctor | CSXsuper_ctor)))
         error("return without calling constructor");
-
     sc->callSuper |= CSXreturn;
+    if (sc->fieldinit)
+    {
+        AggregateDeclaration *ad = fd->isAggregateMember2();
+        assert(ad);
+        size_t dim = sc->fieldinit_dim;
+        for (size_t i = 0; i < dim; i++)
+        {
+            VarDeclaration *v = ad->fields[i];
+            bool mustInit = (v->storage_class & STCnodefaultctor ||
+                             v->type->needsNested());
+            if (mustInit && !(sc->fieldinit[i] & CSXthis_ctor))
+                error("an earlier return statement skips field %s initialization", v->toChars());
+
+            sc->fieldinit[i] |= CSXreturn;
+        }
+    }
 
     // See if all returns are instead to be replaced with a goto returnLabel;
     if (fd->returnLabel)
@@ -4941,11 +4926,6 @@ Statement *ThrowStatement::semantic(Scope *sc)
     FuncDeclaration *fd = sc->parent->isFuncDeclaration();
     fd->hasReturnExp |= 2;
 
-#if DMDV1
-    // See bugzilla 3388. Should this be or not?
-    if (sc->incontract)
-        error("Throw statements cannot be in contracts");
-#endif
     exp = exp->semantic(sc);
     exp = resolveProperties(sc, exp);
     if (exp->op == TOKerror)
@@ -5140,6 +5120,12 @@ Statement *LabelStatement::semantic(Scope *sc)
     sc = sc->push();
     sc->scopesym = sc->enclosing->scopesym;
     sc->callSuper |= CSXlabel;
+    if (sc->fieldinit)
+    {
+        size_t dim = sc->fieldinit_dim;
+        for (size_t i = 0; i < dim; i++)
+            sc->fieldinit[i] |= CSXlabel;
+    }
     sc->slabel = this;
     if (statement)
         statement = statement->semanticNoScope(sc);
@@ -5283,10 +5269,10 @@ Statement *ImportStatement::semantic(Scope *sc)
     for (size_t i = 0; i < imports->dim; i++)
     {   Import *s = (*imports)[i]->isImport();
 
-        for (size_t i = 0; i < s->names.dim; i++)
+        for (size_t j = 0; j < s->names.dim; j++)
         {
-            Identifier *name = s->names[i];
-            Identifier *alias = s->aliases[i];
+            Identifier *name = s->names[j];
+            Identifier *alias = s->aliases[j];
 
             if (!alias)
                 alias = name;
@@ -5302,9 +5288,9 @@ Statement *ImportStatement::semantic(Scope *sc)
         s->semantic2(sc);
         sc->insert(s);
 
-        for (size_t i = 0; i < s->aliasdecls.dim; i++)
+        for (size_t j = 0; j < s->aliasdecls.dim; j++)
         {
-            sc->insert(s->aliasdecls[i]);
+            sc->insert(s->aliasdecls[j]);
         }
     }
     return this;

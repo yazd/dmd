@@ -483,7 +483,7 @@ FuncDeclaration *StructDeclaration::buildXopEquals(Scope *sc)
         {
             TypeFunction *tfeqptr;
             {
-                Scope sc;
+                Scope scx;
 
                 /* const bool opEquals(ref const S s);
                  */
@@ -491,7 +491,7 @@ FuncDeclaration *StructDeclaration::buildXopEquals(Scope *sc)
                 parameters->push(new Parameter(STCref | STCconst, type, NULL, NULL));
                 tfeqptr = new TypeFunction(parameters, Type::tbool, 0, LINKd);
                 tfeqptr->mod = MODconst;
-                tfeqptr = (TypeFunction *)tfeqptr->semantic(Loc(), &sc);
+                tfeqptr = (TypeFunction *)tfeqptr->semantic(Loc(), &scx);
             }
             fd = fd->overloadExactMatch(tfeqptr);
             if (fd)
@@ -569,7 +569,7 @@ FuncDeclaration *StructDeclaration::buildXopCmp(Scope *sc)
         {
             TypeFunction *tfcmpptr;
             {
-                Scope sc;
+                Scope scx;
 
                 /* const int opCmp(ref const S s);
                  */
@@ -577,7 +577,7 @@ FuncDeclaration *StructDeclaration::buildXopCmp(Scope *sc)
                 parameters->push(new Parameter(STCref | STCconst, type, NULL, NULL));
                 tfcmpptr = new TypeFunction(parameters, Type::tint32, 0, LINKd);
                 tfcmpptr->mod = MODconst;
-                tfcmpptr = (TypeFunction *)tfcmpptr->semantic(Loc(), &sc);
+                tfcmpptr = (TypeFunction *)tfcmpptr->semantic(Loc(), &scx);
             }
             fd = fd->overloadExactMatch(tfcmpptr);
             if (fd)
@@ -758,7 +758,6 @@ FuncDeclaration *StructDeclaration::buildCpCtor(Scope *sc)
  * and the ordering changes (runs forward instead of backwards).
  */
 
-#if DMDV2
 FuncDeclaration *StructDeclaration::buildPostBlit(Scope *sc)
 {
     //printf("StructDeclaration::buildPostBlit() %s\n", toChars());
@@ -864,8 +863,6 @@ FuncDeclaration *StructDeclaration::buildPostBlit(Scope *sc)
     }
 }
 
-#endif
-
 /*****************************************
  * Create inclusive destructor for struct/class by aggregating
  * all the destructors in dtors[] with the destructors for
@@ -882,7 +879,6 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
     Loc loc = Loc();    // internal code should have no loc to prevent coverage
 
     Expression *e = NULL;
-#if DMDV2
     for (size_t i = 0; i < fields.dim; i++)
     {
         Dsymbol *s = fields[i];
@@ -946,7 +942,6 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
         members->push(dd);
         dd->semantic(sc);
     }
-#endif
 
     switch (dtors.dim)
     {

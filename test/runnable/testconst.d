@@ -3219,6 +3219,132 @@ void test10761()
 }
 
 /************************************/
+// 11226
+
+void test11226()
+{
+    typeof(null) m;
+    const typeof(null) c = m;
+    immutable typeof(null) i = m;
+
+    m = m, m = c, m = i;
+    assert(m == c);
+    assert(m == i);
+    assert(c == i);
+    static assert(is(typeof(true ? m : m) ==           typeof(null)));
+    static assert(is(typeof(true ? m : c) ==     const typeof(null)));
+    static assert(is(typeof(true ? m : i) ==     const typeof(null)));
+    static assert(is(typeof(true ? c : m) ==     const typeof(null)));
+    static assert(is(typeof(true ? c : c) ==     const typeof(null)));
+    static assert(is(typeof(true ? c : i) ==     const typeof(null)));
+    static assert(is(typeof(true ? i : m) ==     const typeof(null)));
+    static assert(is(typeof(true ? i : c) ==     const typeof(null)));
+    static assert(is(typeof(true ? i : i) == immutable typeof(null)));
+
+    static assert(typeof(m).stringof ==           "typeof(null)" );
+    static assert(typeof(c).stringof ==     "const(typeof(null))");
+    static assert(typeof(i).stringof == "immutable(typeof(null))");
+}
+
+/************************************/
+// 11257
+
+struct R11257
+{
+    union
+    {
+        const(Object) original;
+        Object stripped;
+    }
+}
+void test11257()
+{
+    const(R11257) cr;
+    R11257 mr = cr;  // Error: cannot implicitly convert expression (cr) of type const(R) to R
+}
+
+/************************************/
+// 11215
+
+shared(inout(void)**) f11215(inout int);
+
+static assert(is(typeof(f11215(0)) == shared(void**)));
+static assert(is(typeof(f11215((const int).init)) == shared(const(void)**)));
+
+/************************************/
+// 11489
+
+void test11489(inout int = 0)
+{
+    static class B {}
+    static class D : B {}
+
+                 D [] dm;
+           const(D)[] dc;
+           inout(D)[] dw;
+          shared(D)[] dsm;
+    shared(const D)[] dsc;
+    shared(inout D)[] dsw;
+       immutable(D)[] di;
+
+    static assert(!__traits(compiles, {              B [] b = dm; }));
+    static assert( __traits(compiles, {        const(B)[] b = dm; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = dm; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = dm; }));
+    static assert(!__traits(compiles, { shared(const B)[] b = dm; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = dm; }));
+    static assert(!__traits(compiles, {    immutable(B)[] b = dm; }));
+
+    static assert(!__traits(compiles, {              B [] b = dc; }));
+    static assert( __traits(compiles, {        const(B)[] b = dc; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = dc; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = dc; }));
+    static assert(!__traits(compiles, { shared(const B)[] b = dc; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = dc; }));
+    static assert(!__traits(compiles, {    immutable(B)[] b = dc; }));
+
+    static assert(!__traits(compiles, {              B [] b = dw; }));
+    static assert( __traits(compiles, {        const(B)[] b = dw; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = dw; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = dw; }));
+    static assert(!__traits(compiles, { shared(const B)[] b = dw; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = dw; }));
+    static assert(!__traits(compiles, {    immutable(B)[] b = dw; }));
+
+    static assert(!__traits(compiles, {              B [] b = dsm; }));
+    static assert(!__traits(compiles, {        const(B)[] b = dsm; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = dsm; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = dsm; }));
+    static assert( __traits(compiles, { shared(const B)[] b = dsm; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = dsm; }));
+    static assert(!__traits(compiles, {    immutable(B)[] b = dsm; }));
+
+    static assert(!__traits(compiles, {              B [] b = dsc; }));
+    static assert(!__traits(compiles, {        const(B)[] b = dsc; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = dsc; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = dsc; }));
+    static assert( __traits(compiles, { shared(const B)[] b = dsc; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = dsc; }));
+    static assert(!__traits(compiles, {    immutable(B)[] b = dsc; }));
+
+    static assert(!__traits(compiles, {              B [] b = dsw; }));
+    static assert(!__traits(compiles, {        const(B)[] b = dsw; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = dsw; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = dsw; }));
+    static assert( __traits(compiles, { shared(const B)[] b = dsw; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = dsw; }));
+    static assert(!__traits(compiles, {    immutable(B)[] b = dsw; }));
+
+    static assert(!__traits(compiles, {              B [] b = di; }));
+    static assert( __traits(compiles, {        const(B)[] b = di; }));
+    static assert(!__traits(compiles, {        inout(B)[] b = di; }));
+    static assert(!__traits(compiles, {       shared(B)[] b = di; }));
+    static assert( __traits(compiles, { shared(const B)[] b = di; }));
+    static assert(!__traits(compiles, { shared(inout B)[] b = di; }));
+    static assert( __traits(compiles, {    immutable(B)[] b = di; }));
+}
+
+/************************************/
 
 int main()
 {
@@ -3343,6 +3469,7 @@ int main()
     test9090();
     test9461();
     test9209();
+    test11226();
 
     printf("Success\n");
     return 0;

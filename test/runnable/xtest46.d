@@ -2193,6 +2193,15 @@ static assert(A110.s == "Boo!int");
 
 /***************************************************/
 
+int test11247()
+{
+    static assert(is(byte[typeof(int.init).sizeof] == byte[4]));
+    static assert(is(byte[typeof(return).sizeof] == byte[4]));
+    return 0;
+}
+
+/***************************************************/
+
 // 3716
 void test111()
 {
@@ -3435,6 +3444,25 @@ void test2356()
 }
 
 /***************************************************/
+// 11238
+
+void test11238()
+{
+    int[2] m;
+    m[0] = 4,m[1] = 6;
+    //printf("%d,%d\n", m[0], m[1]);
+    assert(m[0] == 4 && m[1] == 6);
+
+    m = [m[1], m[0]];   // swap
+    assert(m[0] == 6 && m[1] == 4);
+    //printf("%d,%d\n", m[0], m[1]);
+
+    m = [m[1], m[0]];   // swap
+    //printf("%d,%d\n", m[0], m[1]);
+    assert(m[0] == 4 && m[1] == 6);
+}
+
+/***************************************************/
 
 class A2540
 {
@@ -3898,6 +3926,14 @@ void test4596()
 
 /***************************************************/
 
+void test10927()
+{
+    static assert( (1+2i) ^^ 3 == -11 - 2i );
+    auto a = (1+2i) ^^ 3;
+}
+
+/***************************************************/
+
 void test4963()
 {
     struct Value {
@@ -4321,6 +4357,24 @@ void test6473()
 {
     void build(Eins6473 devices = Eins6473())
     {}
+}
+
+/***************************************************/
+
+uint rol11417(uint n)(in uint x)
+{
+    return x << n | x >> 32 - n;
+}
+
+uint ror11417(uint n)(in uint x)
+{
+    return x >> n | x << 32 - n;
+}
+
+void test11417()
+{
+    assert(rol11417!1(0x8000_0000) == 0x1);
+    assert(ror11417!1(0x1) == 0x8000_0000);
 }
 
 /***************************************************/
@@ -6686,6 +6740,22 @@ void test11075()
 
 
 /***************************************************/
+// 11317
+
+void test11317()
+{
+    auto ref uint fun()
+    {
+        return 0;
+    }
+
+    void test(ref uint x) {}
+    static assert(!__traits(compiles, test(fun())));
+
+    assert(fun() == 0);
+}
+
+/***************************************************/
 
 int main()
 {
@@ -6859,6 +6929,7 @@ int main()
     test148();
     test149();
     test2356();
+    test11238();
     test2540();
     test150();
     test151();
@@ -6926,6 +6997,7 @@ int main()
     test7534cov();
     test7618();
     test7621();
+    test11417();
     test7682();
     test7735();
     test7823();
@@ -6962,6 +7034,7 @@ int main()
     test10634();
     test7254();
     test11075();
+    test11317();
 
     printf("Success\n");
     return 0;

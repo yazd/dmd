@@ -138,9 +138,7 @@ public:
     virtual TemplateTypeParameter  *isTemplateTypeParameter();
     virtual TemplateValueParameter *isTemplateValueParameter();
     virtual TemplateAliasParameter *isTemplateAliasParameter();
-#if DMDV2
     virtual TemplateThisParameter *isTemplateThisParameter();
-#endif
     virtual TemplateTupleParameter *isTemplateTupleParameter();
 
     virtual TemplateParameter *syntaxCopy() = 0;
@@ -191,7 +189,6 @@ public:
     void *dummyArg();
 };
 
-#if DMDV2
 class TemplateThisParameter : public TemplateTypeParameter
 {
 public:
@@ -205,7 +202,6 @@ public:
     TemplateParameter *syntaxCopy();
     void toCBuffer(OutBuffer *buf, HdrGenState *hgs);
 };
-#endif
 
 class TemplateValueParameter : public TemplateParameter
 {
@@ -317,12 +313,6 @@ public:
     hash_t hash;                        // cached result of hashCode()
     Expressions *fargs;                 // for function template, these are the function arguments
     Module *instantiatingModule;        // the top module that instantiated this instance
-#ifdef IN_GCC
-    /* On some targets, it is necessary to know whether a symbol
-       will be emitted in the output or not before the symbol
-       is used.  This can be different from getModule(). */
-    Module * objFileModule;
-#endif
 
     TemplateInstance(Loc loc, Identifier *temp_id);
     TemplateInstance(Loc loc, TemplateDeclaration *tempdecl, Objects *tiargs);

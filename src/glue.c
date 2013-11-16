@@ -291,6 +291,22 @@ void Module::genobjfile(int multiobj)
 
     //printf("Module::genobjfile(multiobj = %d) %s\n", multiobj, toChars());
 
+    if (ident == Id::entrypoint)
+    {
+        char v = global.params.verbose;
+        global.params.verbose = 0;
+
+        for (size_t i = 0; i < members->dim; i++)
+        {
+            Dsymbol *member = (*members)[i];
+            //printf("toObjFile %s %s\n", member->kind(), member->toChars());
+            member->toObjFile(global.params.multiobj);
+        }
+
+        global.params.verbose = v;
+        return;
+    }
+
     lastmname = srcfile->toChars();
 
     objmod->initfile(lastmname, NULL, toPrettyChars());
@@ -429,10 +445,8 @@ void Module::genobjfile(int multiobj)
         sctor = callFuncsAndGates(this, &sctors, &ectorgates, "__modctor");
         sdtor = callFuncsAndGates(this, &sdtors, NULL, "__moddtor");
 
-#if DMDV2
         ssharedctor = callFuncsAndGates(this, &ssharedctors, (StaticDtorDeclarations *)&esharedctorgates, "__modsharedctor");
         sshareddtor = callFuncsAndGates(this, &sshareddtors, NULL, "__modshareddtor");
-#endif
         stest = callFuncsAndGates(this, &stests, NULL, "__modtest");
 
         if (doppelganger)
@@ -586,6 +600,13 @@ void FuncDeclaration::toObjFile(int multiobj)
      */
     TemplateInstance *ti = inTemplateInstance();
     if (!global.params.useUnitTests &&
+        !global.params.allInst &&
+        /* The issue is that if the importee is compiled with a different -debug
+         * setting than the importer, the importer may believe it exists
+         * in the compiled importee when it does not, when the instantiation
+         * is behind a conditional debug declaration.
+         */
+        !global.params.debuglevel &&     // workaround for Bugzilla 11239
         ti && ti->instantiatingModule && !ti->instantiatingModule->isRoot())
     {
         Module *mi = ti->instantiatingModule;
@@ -667,6 +688,7 @@ void FuncDeclaration::toObjFile(int multiobj)
 
     if (isNested())
     {
+
 //      if (!(config.flags3 & CFG3pic))
 //          s->Sclass = SCstatic;
         f->Fflags3 |= Fnested;
@@ -678,19 +700,18 @@ void FuncDeclaration::toObjFile(int multiobj)
         // Bug 8016 - only include the function if it is a template instance
         Dsymbol * owner = NULL;
         if (fdp)
-        {   owner =  fdp->toParent();
-            while (owner && !owner->isTemplateInstance())
-                owner = owner->toParent();
-        }
-
-        if (owner && fdp && fdp->semanticRun == PASSsemantic3done &&
-            !fdp->isUnitTestDeclaration())
         {
-            /* Can't do unittest's out of order, they are order dependent in that their
-             * execution is done in lexical order, and some modules (std.datetime *cough*
-             * *cough*) rely on this.
-             */
-            fdp->toObjFile(multiobj);
+            //printf("fdp = %s %s\n", fdp->kind(), fdp->toChars());
+            owner =  fdp->toParent2();
+            if (owner && fdp->semanticRun == PASSsemantic3done &&
+                !fdp->isUnitTestDeclaration())
+            {
+                /* Can't do unittest's out of order, they are order dependent in that their
+                 * execution is done in lexical order, and some modules (std.datetime *cough*
+                 * *cough*) rely on this.
+                 */
+                fdp->toObjFile(multiobj);
+            }
         }
     }
     else
@@ -815,11 +836,7 @@ void FuncDeclaration::toObjFile(int multiobj)
         sprintf(hiddenparam,"__HID%d",++hiddenparami);
         shidden = symbol_name(hiddenparam,SCparameter,thidden);
         shidden->Sflags |= SFLtrue | SFLfree;
-#if DMDV1
-        if (func->nrvo_can && func->nrvo_var && func->nrvo_var->nestedref)
-#else
         if (func->nrvo_can && func->nrvo_var && func->nrvo_var->nestedrefs.dim)
-#endif
             type_setcv(&shidden->Stype, shidden->Stype->Tty | mTYvolatile);
         irs.shidden = shidden;
         this->shidden = shidden;
@@ -865,6 +882,7 @@ void FuncDeclaration::toObjFile(int multiobj)
         for (size_t i = 0; i < parameters->dim; i++)
         {
             VarDeclaration *v = (*parameters)[i];
+            //printf("param[%d] = %p, %s\n", i, v, v->toChars());
             assert(!v->csym);
             params[pi + i] = v->toSymbol();
         }
@@ -1001,9 +1019,7 @@ void FuncDeclaration::toObjFile(int multiobj)
             sbody = new CompoundStatement(Loc(), sp, stf);
         }
 
-#if DMDV2
         buildClosure(&irs);
-#endif
 
 #if TARGET_WINDOS
         if (func->isSynchronized() && cd && config.flags2 & CFG2seh &&
@@ -1037,20 +1053,16 @@ void FuncDeclaration::toObjFile(int multiobj)
     }
 
     // If static constructor
-#if DMDV2
     if (isSharedStaticCtorDeclaration())        // must come first because it derives from StaticCtorDeclaration
     {
         ssharedctors.push(s);
     }
-    else
-#endif
-    if (isStaticCtorDeclaration())
+    else if (isStaticCtorDeclaration())
     {
         sctors.push(s);
     }
 
     // If static destructor
-#if DMDV2
     if (isSharedStaticDtorDeclaration())        // must come first because it derives from StaticDtorDeclaration
     {
         SharedStaticDtorDeclaration *f = isSharedStaticDtorDeclaration();
@@ -1063,9 +1075,7 @@ void FuncDeclaration::toObjFile(int multiobj)
 
         sshareddtors.shift(s);
     }
-    else
-#endif
-    if (isStaticDtorDeclaration())
+    else if (isStaticDtorDeclaration())
     {
         StaticDtorDeclaration *f = isStaticDtorDeclaration();
         assert(f);
@@ -1124,13 +1134,11 @@ void FuncDeclaration::toObjFile(int multiobj)
     if (ident && memcmp(ident->toChars(), "_STD", 4) == 0)
         objmod->staticdtor(s);
 #endif
-#if DMDV2
     if (irs.startaddress)
     {
         //printf("Setting start address\n");
         objmod->startaddress(irs.startaddress);
     }
-#endif
 }
 
 bool onlyOneMain(Loc loc)
@@ -1265,7 +1273,6 @@ unsigned Type::totym()
             assert(0);
     }
 
-#if DMDV2
     // Add modifiers
     switch (mod)
     {
@@ -1288,7 +1295,6 @@ unsigned Type::totym()
         default:
             assert(0);
     }
-#endif
 
     return t;
 }
@@ -1325,10 +1331,8 @@ unsigned TypeFunction::totym()
             printf("linkage = %d\n", linkage);
             assert(0);
     }
-#if DMDV2
     if (isnothrow)
         tyf |= mTYnothrow;
-#endif
     return tyf;
 }
 

@@ -47,8 +47,9 @@
 
 #include        "arraytypes.h"
 
-int executecmd(char *cmd, char *args, int useenv);
-int executearg0(char *cmd, char *args);
+void toWinPath(char *src);
+int executecmd(const char *cmd, const char *args);
+int executearg0(const char *cmd, const char *args);
 
 /****************************************
  * Write filename to cmdbuf, quoting if necessary.
@@ -95,13 +96,11 @@ void writeFilename(OutBuffer *buf, const char *filename)
  */
 int findNoMainError(int fd)
 {
-    static const char nmeErrorMessage[] =
 #if __APPLE__
-        "\"__Dmain\", referenced from:"
+    static const char nmeErrorMessage[] = "\"__Dmain\", referenced from:";
 #else
-        "undefined reference to `_Dmain'"
+    static const char nmeErrorMessage[] = "undefined reference to `_Dmain'";
 #endif
-        ;
 
     FILE *stream = fdopen(fd, "r");
     if (stream == NULL) return -1;
@@ -273,7 +272,9 @@ int runLINK()
                 sprintf(p, "@%s", lnkfilename);
         }
 
-        char *linkcmd = getenv("LINKCMD64");
+        const char *linkcmd = getenv("LINKCMD64");
+        if (!linkcmd)
+            linkcmd = getenv("LINKCMD"); // backward compatible
         if (!linkcmd)
         {
             if (vcinstalldir)
@@ -287,7 +288,7 @@ int runLINK()
             else
                 linkcmd = "link";
         }
-        int status = executecmd(linkcmd, p, 1);
+        int status = executecmd(linkcmd, p);
         if (lnkfilename)
         {
             remove(lnkfilename);
@@ -418,10 +419,10 @@ int runLINK()
                 sprintf(p, "@%s", lnkfilename);
         }
 
-        char *linkcmd = getenv("LINKCMD");
+        const char *linkcmd = getenv("LINKCMD");
         if (!linkcmd)
             linkcmd = "link";
-        int status = executecmd(linkcmd, p, 1);
+        int status = executecmd(linkcmd, p);
         if (lnkfilename)
         {
             remove(lnkfilename);
@@ -439,22 +440,22 @@ int runLINK()
     const char *cc = getenv("CC");
     if (!cc)
         cc = "gcc";
-    argv.push((char *)cc);
+    argv.push(cc);
     argv.insert(1, global.params.objfiles);
 
 #if __APPLE__
     // If we are on Mac OS X and linking a dynamic library,
     // add the "-dynamiclib" flag
     if (global.params.dll)
-        argv.push((char *) "-dynamiclib");
+        argv.push("-dynamiclib");
 #elif linux || __FreeBSD__ || __OpenBSD__ || __sun
     if (global.params.dll)
-        argv.push((char *) "-shared");
+        argv.push("-shared");
 #endif
 
     // None of that a.out stuff. Use explicit exe file name, or
     // generate one from name of first source file.
-    argv.push((char *)"-o");
+    argv.push("-o");
     if (global.params.exefile)
     {
         argv.push(global.params.exefile);
@@ -486,20 +487,20 @@ int runLINK()
     FileName::ensurePathToNameExists(global.params.exefile);
 
     if (global.params.symdebug)
-        argv.push((char *)"-g");
+        argv.push("-g");
 
     if (global.params.is64bit)
-        argv.push((char *)"-m64");
+        argv.push("-m64");
     else
-        argv.push((char *)"-m32");
+        argv.push("-m32");
 
     if (global.params.map || global.params.mapfile)
     {
-        argv.push((char *)"-Xlinker");
+        argv.push("-Xlinker");
 #if __APPLE__
-        argv.push((char *)"-map");
+        argv.push("-map");
 #else
-        argv.push((char *)"-Map");
+        argv.push("-Map");
 #endif
         if (!global.params.mapfile)
         {
@@ -514,7 +515,7 @@ int runLINK()
 
             global.params.mapfile = (char *)p;
         }
-        argv.push((char *)"-Xlinker");
+        argv.push("-Xlinker");
         argv.push(global.params.mapfile);
     }
 
@@ -530,17 +531,17 @@ int runLINK()
          * BUG: disabled because it causes exception handling to fail
          * because EH sections are "unreferenced" and elided
          */
-        argv.push((char *)"-Xlinker");
-        argv.push((char *)"--gc-sections");
+        argv.push("-Xlinker");
+        argv.push("--gc-sections");
     }
 
     for (size_t i = 0; i < global.params.linkswitches->dim; i++)
-    {   char *p = (*global.params.linkswitches)[i];
+    {   const char *p = (*global.params.linkswitches)[i];
         if (!p || !p[0] || !(p[0] == '-' && (p[1] == 'l' || p[1] == 'L')))
             // Don't need -Xlinker if switch starts with -l or -L.
             // Eliding -Xlinker is significant for -L since it allows our paths
             // to take precedence over gcc defaults.
-            argv.push((char *)"-Xlinker");
+            argv.push("-Xlinker");
         argv.push(p);
     }
 
@@ -553,7 +554,7 @@ int runLINK()
      *  4. standard libraries.
      */
     for (size_t i = 0; i < global.params.libfiles->dim; i++)
-    {   char *p = (*global.params.libfiles)[i];
+    {   const char *p = (*global.params.libfiles)[i];
         size_t plen = strlen(p);
         if (plen > 2 && p[plen - 2] == '.' && p[plen -1] == 'a')
             argv.push(p);
@@ -593,15 +594,15 @@ int runLINK()
     }
 
 #ifdef __sun
-    argv.push((char *)"-mt");
+    argv.push("-mt");
 #endif
 
-//    argv.push((void *)"-ldruntime");
-    argv.push((char *)"-lpthread");
-    argv.push((char *)"-lm");
-#if linux && DMDV2
+//    argv.push("-ldruntime");
+    argv.push("-lpthread");
+    argv.push("-lm");
+#if linux
     // Changes in ld for Ubuntu 11.10 require this to appear after phobos2
-    argv.push((char *)"-lrt");
+    argv.push("-lrt");
 #endif
 
     if (!global.params.quiet || global.params.verbose)
@@ -630,7 +631,7 @@ int runLINK()
         dup2(fds[1], STDERR_FILENO);
         close(fds[0]);
 
-        execvp(argv[0], argv.tdata());
+        execvp(argv[0], (char **)argv.tdata());
         perror(argv[0]);           // failed to execute
         return -1;
     }
@@ -689,11 +690,10 @@ void deleteExeFile()
  * Execute a rule.  Return the status.
  *      cmd     program to run
  *      args    arguments to cmd, as a string
- *      useenv  if cmd knows about _CMDLINE environment variable
  */
 
 #if _WIN32
-int executecmd(char *cmd, char *args, int useenv)
+int executecmd(const char *cmd, const char *args)
 {
     int status;
     size_t len;
@@ -701,37 +701,28 @@ int executecmd(char *cmd, char *args, int useenv)
     if (!global.params.quiet || global.params.verbose)
         fprintf(global.stdmsg, "%s %s\n", cmd, args);
 
-    if (global.params.is64bit)
+    if (!global.params.is64bit)
     {
-    }
-    else
-    {
-    if ((len = strlen(args)) > 255)
-    {   char *q;
-        static char envname[] = "@_CMDLINE";
-
-        envname[0] = '@';
-        switch (useenv)
-        {   case 0:     goto L1;
-            case 2: envname[0] = '%';   break;
-        }
-        q = (char *) alloca(sizeof(envname) + len + 1);
-        sprintf(q,"%s=%s", envname + 1, args);
-        status = putenv(q);
-        if (status == 0)
-            args = envname;
-        else
+        if ((len = strlen(args)) > 255)
         {
-        L1:
-            error(Loc(), "command line length of %d is too long",len);
+            char *q = (char *) alloca(8 + len + 1);
+            sprintf(q,"_CMDLINE=%s", args);
+            status = putenv(q);
+            if (status == 0)
+            {
+                args = "@_CMDLINE";
+            }
+            else
+            {
+                error(Loc(), "command line length of %d is too long",len);
             }
         }
     }
 
-#if _WIN32
     // Normalize executable path separators, see Bugzilla 9330
-    for (char *p=cmd; *p; ++p)
-        if (*p == '/') *p = '\\';
+    char *p = mem.strdup(cmd);
+    toWinPath(p);
+    cmd = p;
 
 #ifdef _MSC_VER
     if(strchr(cmd, ' '))
@@ -744,14 +735,12 @@ int executecmd(char *cmd, char *args, int useenv)
             cmd = shortName;
     }
 #endif
-#endif
 
     status = executearg0(cmd,args);
-#if _WIN32
     if (status == -1)
         // spawnlp returns intptr_t in some systems, not int
         status = spawnlp(0,cmd,cmd,args,NULL);
-#endif
+
 //    if (global.params.verbose)
 //      fprintf(global.stdmsg, "\n");
     if (status)
@@ -774,10 +763,10 @@ int executecmd(char *cmd, char *args, int useenv)
  */
 
 #if _WIN32
-int executearg0(char *cmd, char *args)
+int executearg0(const char *cmd, const char *args)
 {
     const char *file;
-    char *argv0 = global.params.argv0;
+    const char *argv0 = global.params.argv0;
 
     //printf("argv0='%s', cmd='%s', args='%s'\n",argv0,cmd,args);
 
@@ -788,27 +777,8 @@ int executearg0(char *cmd, char *args)
     file = FileName::replaceName(argv0, cmd);
 
     //printf("spawning '%s'\n",file);
-#if _WIN32
     // spawnlp returns intptr_t in some systems, not int
     return spawnl(0,file,file,args,NULL);
-#elif linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
-    char *full;
-    int cmdl = strlen(cmd);
-
-    full = (char*) mem.malloc(cmdl + strlen(args) + 2);
-    if (full == NULL)
-        return 1;
-    strcpy(full, cmd);
-    full [cmdl] = ' ';
-    strcpy(full + cmdl + 1, args);
-
-    int result = system(full);
-
-    mem.free(full);
-    return result;
-#else
-    assert(0);
-#endif
 }
 #endif
 
@@ -833,7 +803,7 @@ int runProgram()
 
     argv.push(global.params.exefile);
     for (size_t i = 0; i < global.params.runargs_length; i++)
-    {   char *a = global.params.runargs[i];
+    {   const char *a = global.params.runargs[i];
 
 #if _WIN32
         // BUG: what about " appearing in the string?
@@ -867,7 +837,7 @@ int runProgram()
         {   // Make it "./fn"
             fn = FileName::combine(".", fn);
         }
-        execv(fn, argv.tdata());
+        execv(fn, (char **)argv.tdata());
         perror(fn);             // failed to execute
         return -1;
     }
