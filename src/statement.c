@@ -96,6 +96,7 @@ void Statement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 {
     buf->printf("Statement::toCBuffer()");
     buf->writenl();
+    assert(0);
 }
 
 Statement *Statement::semantic(Scope *sc)
@@ -156,16 +157,16 @@ void Statement::deprecation(const char *format, ...)
 bool Statement::hasBreak()
 {
     //printf("Statement::hasBreak()\n");
-    return FALSE;
+    return false;
 }
 
 bool Statement::hasContinue()
 {
-    return FALSE;
+    return false;
 }
 
 /* ============================================== */
-// TRUE if statement uses exception handling
+// true if statement uses exception handling
 
 bool Statement::usesEH()
 {
@@ -188,7 +189,7 @@ bool OnScopeStatement::usesEHimpl()      { return true; }
 bool SynchronizedStatement::usesEHimpl() { return true; }
 
 /* ============================================== */
-// TRUE if statement 'comes from' somewhere else, like a goto
+// true if statement 'comes from' somewhere else, like a goto
 
 bool Statement::comeFrom()
 {
@@ -289,6 +290,7 @@ Statements *Statement::flatten(Scope *sc)
 ErrorStatement::ErrorStatement()
     : Statement(Loc())
 {
+    assert(global.gaggedErrors || global.errors);
 }
 
 Statement *ErrorStatement::syntaxCopy()
@@ -403,7 +405,7 @@ int ExpStatement::blockExit(bool mustNotThrow)
         if (exp->op == TOKassert)
         {   AssertExp *a = (AssertExp *)exp;
 
-            if (a->e1->isBool(FALSE))   // if it's an assert(0)
+            if (a->e1->isBool(false))   // if it's an assert(0)
                 return BEhalt;
         }
         if (exp->canThrow(mustNotThrow))
@@ -441,6 +443,7 @@ Statement *ExpStatement::scopeCode(Scope *sc, Statement **sentry, Statement **se
                         Identifier *id = Lexer::uniqueId("__runDtor");
                         ExpInitializer *ie = new ExpInitializer(loc, new IntegerExp(1));
                         VarDeclaration *rd = new VarDeclaration(loc, Type::tint32, id, ie);
+                        rd->storage_class |= STCtemp;
                         *sentry = new ExpStatement(loc, rd);
                         v->rundtor = rd;
 
@@ -519,8 +522,7 @@ Statements *CompileStatement::flatten(Scope *sc)
         else
         {
             se = se->toUTF8(sc);
-            Parser p(sc->module, (utf8_t *)se->string, se->len, 0);
-            p.scanloc = loc;
+            Parser p(loc, sc->module, (utf8_t *)se->string, se->len, 0);
             p.nextToken();
 
             while (p.token.value != TOKeof)
@@ -596,14 +598,13 @@ Statement *CompoundStatement::syntaxCopy()
 
 
 Statement *CompoundStatement::semantic(Scope *sc)
-{   Statement *s;
-
+{
     //printf("CompoundStatement::semantic(this = %p, sc = %p)\n", this, sc);
 
 #if 0
     for (size_t i = 0; i < statements->dim; i++)
     {
-        s = (*statements)[i];
+        Statement *s = (*statements)[i];
         if (s)
             printf("[%d]: %s", i, s->toChars());
     }
@@ -611,10 +612,10 @@ Statement *CompoundStatement::semantic(Scope *sc)
 
     for (size_t i = 0; i < statements->dim; )
     {
-        s = (*statements)[i];
+        Statement *s = (*statements)[i];
         if (s)
-        {   Statements *flt = s->flatten(sc);
-
+        {
+            Statements *flt = s->flatten(sc);
             if (flt)
             {
                 statements->remove(i);
@@ -664,7 +665,7 @@ Statement *CompoundStatement::semantic(Scope *sc)
                         Identifier *id = Lexer::uniqueId("__o");
 
                         Statement *handler = sexception;
-                        if (sexception->blockExit(FALSE) & BEfallthru)
+                        if (sexception->blockExit(false) & BEfallthru)
                         {   handler = new ThrowStatement(Loc(), new IdentifierExp(Loc(), id));
                             ((ThrowStatement *)handler)->internalThrow = true;
                             handler = new CompoundStatement(Loc(), sexception, handler);
@@ -716,12 +717,24 @@ Statement *CompoundStatement::semantic(Scope *sc)
     }
     for (size_t i = 0; i < statements->dim; ++i)
     {
-        s = (*statements)[i];
-        if (s)
+    L1:
+        Statement *s = (*statements)[i];
+        if (!s)
+            continue;
+
+        Statement *se = s->isErrorStatement();
+        if (se)
+            return se;
+
+        /* Bugzilla 11653: 'semantic' may return another CompoundStatement
+         * (eg. CaseRangeStatement), so flatten it here.
+         */
+        Statements *flt = s->flatten(sc);
+        if (flt)
         {
-            Statement *se = s->isErrorStatement();
-            if (se)
-                return se;
+            statements->remove(i);
+            statements->insert(i, flt);
+            goto L1;
         }
     }
     if (statements->dim == 1)
@@ -741,7 +754,8 @@ ReturnStatement *CompoundStatement::isReturnStatement()
     ReturnStatement *rs = NULL;
 
     for (size_t i = 0; i < statements->dim; i++)
-    {   Statement *s = (*statements)[i];
+    {
+        Statement *s = (*statements)[i];
         if (s)
         {
             rs = s->isReturnStatement();
@@ -802,8 +816,10 @@ int CompoundStatement::blockExit(bool mustNotThrow)
                     else if (sd && (!sd->statement->hasCode() || sd->statement->isCaseStatement()))
                         ;
                     else
-                        s->error("switch case fallthrough - use 'goto %s;' if intended",
-                            s->isCaseStatement() ? "case" : "default");
+                    {
+                        const char *gototype = s->isCaseStatement() ? "case" : "default";
+                        s->error("switch case fallthrough - use 'goto %s;' if intended", gototype);
+                    }
                 }
             }
 
@@ -970,12 +986,12 @@ void UnrolledLoopStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
 bool UnrolledLoopStatement::hasBreak()
 {
-    return TRUE;
+    return true;
 }
 
 bool UnrolledLoopStatement::hasContinue()
 {
-    return TRUE;
+    return true;
 }
 
 int UnrolledLoopStatement::blockExit(bool mustNotThrow)
@@ -1065,12 +1081,12 @@ Statement *ScopeStatement::semantic(Scope *sc)
 bool ScopeStatement::hasBreak()
 {
     //printf("ScopeStatement::hasBreak() %s\n", toChars());
-    return statement ? statement->hasBreak() : FALSE;
+    return statement ? statement->hasBreak() : false;
 }
 
 bool ScopeStatement::hasContinue()
 {
-    return statement ? statement->hasContinue() : FALSE;
+    return statement ? statement->hasContinue() : false;
 }
 
 int ScopeStatement::blockExit(bool mustNotThrow)
@@ -1122,12 +1138,12 @@ Statement *WhileStatement::semantic(Scope *sc)
 
 bool WhileStatement::hasBreak()
 {
-    return TRUE;
+    return true;
 }
 
 bool WhileStatement::hasContinue()
 {
-    return TRUE;
+    return true;
 }
 
 int WhileStatement::blockExit(bool mustNotThrow)
@@ -1186,12 +1202,12 @@ Statement *DoStatement::semantic(Scope *sc)
 
 bool DoStatement::hasBreak()
 {
-    return TRUE;
+    return true;
 }
 
 bool DoStatement::hasContinue()
 {
-    return TRUE;
+    return true;
 }
 
 int DoStatement::blockExit(bool mustNotThrow)
@@ -1210,7 +1226,7 @@ int DoStatement::blockExit(bool mustNotThrow)
     {
         if (condition->canThrow(mustNotThrow))
             result |= BEthrow;
-        if (!(result & BEbreak) && condition->isBool(TRUE))
+        if (!(result & BEbreak) && condition->isBool(true))
             result &= ~BEfallthru;
     }
     result &= ~(BEbreak | BEcontinue);
@@ -1335,12 +1351,12 @@ Statement *ForStatement::scopeCode(Scope *sc, Statement **sentry, Statement **se
 bool ForStatement::hasBreak()
 {
     //printf("ForStatement::hasBreak()\n");
-    return TRUE;
+    return true;
 }
 
 bool ForStatement::hasContinue()
 {
-    return TRUE;
+    return true;
 }
 
 int ForStatement::blockExit(bool mustNotThrow)
@@ -1354,9 +1370,9 @@ int ForStatement::blockExit(bool mustNotThrow)
     if (condition)
     {   if (condition->canThrow(mustNotThrow))
             result |= BEthrow;
-        if (condition->isBool(TRUE))
+        if (condition->isBool(true))
             result &= ~BEfallthru;
-        else if (condition->isBool(FALSE))
+        else if (condition->isBool(false))
             return result;
     }
     else
@@ -1682,7 +1698,7 @@ Lagain:
                 if (dim == 2 && i == 0)
                 {
                     var = new VarDeclaration(loc, arg->type->mutableOf(), Lexer::uniqueId("__key"), NULL);
-                    var->storage_class |= STCforeach;
+                    var->storage_class |= STCtemp | STCforeach;
                     if (var->storage_class & (STCref | STCout))
                         var->storage_class |= STCnodtor;
 
@@ -1696,6 +1712,11 @@ Lagain:
                                   var->type->toChars(), arg->type->toChars());
                             goto Lerror2;
                         }
+                    }
+                    TypeSArray *ta = tab->ty == Tsarray ? (TypeSArray *)tab : NULL;
+                    if (ta && !IntRange::fromType(var->type).contains(ta->dim->getIntRange()))
+                    {
+                        error("index type '%s' cannot cover index range 0..%llu", arg->type->toChars(), ta->dim->toInteger());
                     }
                 }
                 else
@@ -1746,6 +1767,7 @@ Lagain:
             Identifier *id = Lexer::uniqueId("__aggr");
             ExpInitializer *ie = new ExpInitializer(loc, new SliceExp(loc, aggr, NULL, NULL));
             VarDeclaration *tmp = new VarDeclaration(loc, tab->nextOf()->arrayOf(), id, ie);
+            tmp->storage_class |= STCtemp;
 
             Expression *tmp_length = new DotIdExp(loc, new VarExp(loc, tmp), Id::length);
 
@@ -1753,6 +1775,7 @@ Lagain:
             {
                 Identifier *idkey = Lexer::uniqueId("__key");
                 key = new VarDeclaration(loc, Type::tsize_t, idkey, NULL);
+                key->storage_class |= STCtemp;
             }
             if (op == TOKforeach_reverse)
                 key->init = new ExpInitializer(loc, tmp_length);
@@ -1890,6 +1913,7 @@ Lagain:
              */
             Identifier *rid = Identifier::generateId("__r");
             VarDeclaration *r = new VarDeclaration(loc, NULL, rid, new ExpInitializer(loc, aggr));
+            r->storage_class |= STCtemp;
             Statement *init = new ExpStatement(loc, r);
 
             // !__r.empty
@@ -1922,7 +1946,7 @@ Lagain:
                 Identifier *id = Lexer::uniqueId("__front");
                 ExpInitializer *ei = new ExpInitializer(loc, einit);
                 VarDeclaration *vd = new VarDeclaration(loc, NULL, id, ei);
-                vd->storage_class |= STCctfe | STCref | STCforeach;
+                vd->storage_class |= STCtemp | STCctfe | STCref | STCforeach;
 
                 makeargs = new ExpStatement(loc, new DeclarationExp(loc, vd));
 
@@ -2063,6 +2087,7 @@ Lagain:
 
                     Initializer *ie = new ExpInitializer(Loc(), new IdentifierExp(Loc(), id));
                     VarDeclaration *v = new VarDeclaration(Loc(), arg->type, arg->ident, ie);
+                    v->storage_class |= STCtemp;
                     s = new ExpStatement(Loc(), v);
                     body = new CompoundStatement(loc, s, body);
                 }
@@ -2070,7 +2095,7 @@ Lagain:
             }
             tfld = new TypeFunction(args, Type::tint32, 0, LINKd);
             cases = new Statements();
-            gotos = new CompoundStatements();
+            gotos = new ScopeStatements();
             FuncLiteralDeclaration *fld = new FuncLiteralDeclaration(loc, Loc(), tfld, TOKdelegate, this);
             fld->fbody = body;
             Expression *flde = new FuncExp(loc, fld);
@@ -2079,14 +2104,14 @@ Lagain:
 
             // Resolve any forward referenced goto's
             for (size_t i = 0; i < gotos->dim; i++)
-            {   CompoundStatement *cs = (*gotos)[i];
-                GotoStatement *gs = (GotoStatement *)(*cs->statements)[0];
-
+            {
+                GotoStatement *gs = (GotoStatement *)(*gotos)[i]->statement;
                 if (!gs->label->statement)
-                {   // 'Promote' it to this scope, and replace with a return
+                {
+                    // 'Promote' it to this scope, and replace with a return
                     cases->push(gs);
                     s = new ReturnStatement(Loc(), new IntegerExp(cases->dim + 1));
-                    (*cs->statements)[0] = s;
+                    (*gotos)[i]->statement = s;
                 }
             }
 
@@ -2100,13 +2125,14 @@ Lagain:
                     {   error("foreach: index cannot be ref");
                         goto Lerror2;
                     }
-                    if (!arg->type->equals(taa->index))
+                    if (!taa->index->implicitConvTo(arg->type))
                     {   error("foreach: index must be type %s, not %s", taa->index->toChars(), arg->type->toChars());
                         goto Lerror2;
                     }
                     arg = (*arguments)[1];
                 }
-                if (!arg->type->equals(taa->nextOf()))
+                if ((!arg->type->equals(taa->nextOf()) && (arg->storageClass & STCref)) ||
+                    !taa->nextOf()->implicitConvTo(arg->type))
                 {   error("foreach: value must be type %s, not %s", taa->nextOf()->toChars(), arg->type->toChars());
                     goto Lerror2;
                 }
@@ -2262,7 +2288,7 @@ Lagain:
                 }
 
                 s = new CompoundStatement(loc, a);
-                s = new SwitchStatement(loc, e, s, FALSE);
+                s = new SwitchStatement(loc, e, s, false);
             }
             s = s->semantic(sc);
             break;
@@ -2282,7 +2308,7 @@ Lagain:
 }
 
 bool ForeachStatement::checkForArgTypes()
-{   bool result = TRUE;
+{   bool result = true;
 
     for (size_t i = 0; i < arguments->dim; i++)
     {   Parameter *arg = (*arguments)[i];
@@ -2290,7 +2316,7 @@ bool ForeachStatement::checkForArgTypes()
         {
             error("cannot infer type for %s", arg->ident->toChars());
             arg->type = Type::terror;
-            result = FALSE;
+            result = false;
         }
     }
     return result;
@@ -2298,12 +2324,12 @@ bool ForeachStatement::checkForArgTypes()
 
 bool ForeachStatement::hasBreak()
 {
-    return TRUE;
+    return true;
 }
 
 bool ForeachStatement::hasContinue()
 {
-    return TRUE;
+    return true;
 }
 
 int ForeachStatement::blockExit(bool mustNotThrow)
@@ -2443,10 +2469,12 @@ Statement *ForeachRangeStatement::semantic(Scope *sc)
 
     ExpInitializer *ie = new ExpInitializer(loc, (op == TOKforeach) ? lwr : upr);
     key = new VarDeclaration(loc, arg->type->mutableOf(), Lexer::uniqueId("__key"), ie);
+    key->storage_class |= STCtemp;
 
     Identifier *id = Lexer::uniqueId("__limit");
     ie = new ExpInitializer(loc, (op == TOKforeach) ? upr : lwr);
     VarDeclaration *tmp = new VarDeclaration(loc, arg->type, id, ie);
+    tmp->storage_class |= STCtemp;
 
     Statements *cs = new Statements();
     // Keep order of evaluation as lwr, then upr
@@ -2498,7 +2526,7 @@ Statement *ForeachRangeStatement::semantic(Scope *sc)
     {
         ie = new ExpInitializer(loc, new IdentifierExp(loc, key->ident));
         VarDeclaration *v = new VarDeclaration(loc, arg->type, arg->ident, ie);
-        v->storage_class |= STCforeach | (arg->storageClass & STCref);
+        v->storage_class |= STCtemp | STCforeach | (arg->storageClass & STCref);
         body = new CompoundStatement(loc, new ExpStatement(loc, v), body);
     }
     if (arg->storageClass & STCref)
@@ -2519,12 +2547,12 @@ Statement *ForeachRangeStatement::semantic(Scope *sc)
 
 bool ForeachRangeStatement::hasBreak()
 {
-    return TRUE;
+    return true;
 }
 
 bool ForeachRangeStatement::hasContinue()
 {
-    return TRUE;
+    return true;
 }
 
 int ForeachRangeStatement::blockExit(bool mustNotThrow)
@@ -2665,14 +2693,14 @@ int IfStatement::blockExit(bool mustNotThrow)
     int result = BEnone;
     if (condition->canThrow(mustNotThrow))
         result |= BEthrow;
-    if (condition->isBool(TRUE))
+    if (condition->isBool(true))
     {
         if (ifbody)
             result |= ifbody->blockExit(mustNotThrow);
         else
             result |= BEfallthru;
     }
-    else if (condition->isBool(FALSE))
+    else if (condition->isBool(false))
     {
         if (elsebody)
             result |= elsebody->blockExit(mustNotThrow);
@@ -3125,7 +3153,7 @@ Statement *SwitchStatement::semantic(Scope *sc)
         ;
     }
 
-    bool needswitcherror = FALSE;
+    bool needswitcherror = false;
     if (isFinal)
     {   Type *t = condition->type;
         while (t && t->ty == Ttypedef)
@@ -3161,7 +3189,7 @@ Statement *SwitchStatement::semantic(Scope *sc)
             }
         }
         else
-            needswitcherror = TRUE;
+            needswitcherror = true;
     }
 
     if (!sc->sw->sdefault && (!isFinal || needswitcherror || global.params.useAssert))
@@ -3185,7 +3213,7 @@ Statement *SwitchStatement::semantic(Scope *sc)
         a->reserve(2);
         sc->sw->sdefault = new DefaultStatement(loc, s);
         a->push(body);
-        if (body->blockExit(FALSE) & BEfallthru)
+        if (body->blockExit(false) & BEfallthru)
             a->push(new BreakStatement(Loc(), NULL));
         a->push(sc->sw->sdefault);
         cs = new CompoundStatement(loc, a);
@@ -3198,7 +3226,7 @@ Statement *SwitchStatement::semantic(Scope *sc)
 
 bool SwitchStatement::hasBreak()
 {
-    return TRUE;
+    return true;
 }
 
 int SwitchStatement::blockExit(bool mustNotThrow)
@@ -3698,9 +3726,8 @@ Statement *ReturnStatement::semantic(Scope *sc)
             exp = exp->inferType(fld->treq->nextOf()->nextOf());
         exp = exp->semantic(sc);
         exp = resolveProperties(sc, exp);
-
-        if (Expression *e = exp->isTemp())
-            exp = e;                // don't need temporary
+        if (!exp->rvalue(true)) // don't make error for void expression
+            exp = new ErrorExp();
         if (exp->op == TOKcall)
             exp = valueNoDtor(exp);
 
@@ -3877,6 +3904,8 @@ Statement *ReturnStatement::semantic(Scope *sc)
                 if (!fd->outId)
                     fd->outId = Id::result;
                 VarDeclaration *v = new VarDeclaration(loc, tret, fd->outId, NULL);
+                if (fd->outId == Id::result)
+                    v->storage_class |= STCtemp;
                 v->noscope = 1;
                 v->storage_class |= STCresult;
                 if (tf->isref)
@@ -4269,6 +4298,7 @@ Statement *SynchronizedStatement::semantic(Scope *sc)
         Identifier *id = Lexer::uniqueId("__sync");
         ExpInitializer *ie = new ExpInitializer(loc, exp);
         VarDeclaration *tmp = new VarDeclaration(loc, exp->type, id, ie);
+        tmp->storage_class |= STCtemp;
 
         Statements *cs = new Statements();
         cs->push(new ExpStatement(loc, tmp));
@@ -4292,9 +4322,9 @@ Statement *SynchronizedStatement::semantic(Scope *sc)
         return s->semantic(sc);
 #endif
     }
-#if 1
     else
-    {   /* Generate our own critical section, then rewrite as:
+    {
+        /* Generate our own critical section, then rewrite as:
          *  __gshared byte[CriticalSection.sizeof] critsec;
          *  _d_criticalenter(critsec.ptr);
          *  try { body } finally { _d_criticalexit(critsec.ptr); }
@@ -4302,10 +4332,17 @@ Statement *SynchronizedStatement::semantic(Scope *sc)
         Identifier *id = Lexer::uniqueId("__critsec");
         Type *t = new TypeSArray(Type::tint8, new IntegerExp(Target::ptrsize + Target::critsecsize()));
         VarDeclaration *tmp = new VarDeclaration(loc, t, id, NULL);
-        tmp->storage_class |= STCgshared | STCstatic;
+        tmp->storage_class |= STCtemp | STCgshared | STCstatic;
 
         Statements *cs = new Statements();
         cs->push(new ExpStatement(loc, tmp));
+
+        /* This is just a dummy variable for "goto skips declaration" error.
+         * Backend optimizer could remove this unused variable.
+         */
+        VarDeclaration *v = new VarDeclaration(loc, Type::tvoidptr, Lexer::uniqueId("__sync"), NULL);
+        v->semantic(sc);
+        cs->push(new ExpStatement(loc, v));
 
         Parameters* args = new Parameters;
         args->push(new Parameter(STCin, t->pointerTo(), NULL, NULL));
@@ -4329,7 +4366,6 @@ Statement *SynchronizedStatement::semantic(Scope *sc)
         s = new CompoundStatement(loc, cs);
         return s->semantic(sc);
     }
-#endif
 Lbody:
     if (body)
         body = body->semantic(sc);
@@ -4340,12 +4376,12 @@ Lbody:
 
 bool SynchronizedStatement::hasBreak()
 {
-    return FALSE; //TRUE;
+    return false; //true;
 }
 
 bool SynchronizedStatement::hasContinue()
 {
-    return FALSE; //TRUE;
+    return false; //true;
 }
 
 int SynchronizedStatement::blockExit(bool mustNotThrow)
@@ -4395,19 +4431,20 @@ Statement *WithStatement::semantic(Scope *sc)
     if (exp->op == TOKerror)
         return new ErrorStatement();
     if (exp->op == TOKimport)
-    {   ScopeExp *es = (ScopeExp *)exp;
-
-        sym = es->sds;
+    {
+        sym = new WithScopeSymbol(this);
+        sym->parent = sc->scopesym;
     }
     else if (exp->op == TOKtype)
-    {   TypeExp *es = (TypeExp *)exp;
-
-        Dsymbol *s = es->type->toDsymbol(sc);
-        sym = s ? s->isScopeDsymbol() : NULL;
-        if (!sym)
-        {   error("with type %s has no members", es->toChars());
+    {
+        Dsymbol *s = ((TypeExp *)exp)->type->toDsymbol(sc);
+        if (!s || !s->isScopeDsymbol())
+        {
+            error("with type %s has no members", exp->toChars());
             return new ErrorStatement();
         }
+        sym = new WithScopeSymbol(this);
+        sym->parent = sc->scopesym;
     }
     else
     {
@@ -4439,6 +4476,7 @@ Statement *WithStatement::semantic(Scope *sc)
             {
                 init = new ExpInitializer(loc, exp);
                 wthis = new VarDeclaration(loc, exp->type, Lexer::uniqueId("__withtmp"), init);
+                wthis->storage_class |= STCtemp;
                 exp = new CommaExp(loc, new DeclarationExp(loc, wthis), new VarExp(loc, wthis));
                 exp = exp->semantic(sc);
             }
@@ -4461,6 +4499,7 @@ Statement *WithStatement::semantic(Scope *sc)
     if (body)
     {
         sc = sc->push(sym);
+        sc->insert(sym);
         body = body->semantic(sc);
         sc->pop();
         if (body && body->isErrorStatement())
@@ -4586,7 +4625,7 @@ Statement *TryCatchStatement::semantic(Scope *sc)
 
 bool TryCatchStatement::hasBreak()
 {
-    return FALSE;
+    return false;
 }
 
 int TryCatchStatement::blockExit(bool mustNotThrow)
@@ -4797,12 +4836,12 @@ void TryFinallyStatement::toCBuffer(OutBuffer *buf, HdrGenState *hgs)
 
 bool TryFinallyStatement::hasBreak()
 {
-    return FALSE; //TRUE;
+    return false; //true;
 }
 
 bool TryFinallyStatement::hasContinue()
 {
-    return FALSE; //TRUE;
+    return false; //true;
 }
 
 int TryFinallyStatement::blockExit(bool mustNotThrow)
@@ -4884,6 +4923,7 @@ Statement *OnScopeStatement::scopeCode(Scope *sc, Statement **sentry, Statement 
 
             ExpInitializer *ie = new ExpInitializer(loc, new IntegerExp(Loc(), 0, Type::tbool));
             VarDeclaration *v = new VarDeclaration(loc, Type::tbool, id, ie);
+            v->storage_class |= STCtemp;
             *sentry = new ExpStatement(loc, v);
 
             Expression *e = new IntegerExp(Loc(), 1, Type::tbool);
@@ -4999,7 +5039,8 @@ Statements *DebugStatement::flatten(Scope *sc)
 {
     Statements *a = statement ? statement->flatten(sc) : NULL;
     if (a)
-    {   for (size_t i = 0; i < a->dim; i++)
+    {
+        for (size_t i = 0; i < a->dim; i++)
         {   Statement *s = (*a)[i];
 
             s = new DebugStatement(loc, s);
@@ -5027,6 +5068,8 @@ GotoStatement::GotoStatement(Loc loc, Identifier *ident)
     this->ident = ident;
     this->label = NULL;
     this->tf = NULL;
+    this->lastVar = NULL;
+    this->fd = NULL;
 }
 
 Statement *GotoStatement::syntaxCopy()
@@ -5036,35 +5079,78 @@ Statement *GotoStatement::syntaxCopy()
 }
 
 Statement *GotoStatement::semantic(Scope *sc)
-{   FuncDeclaration *fd = sc->parent->isFuncDeclaration();
-
+{
+    FuncDeclaration *fd = sc->func;
     //printf("GotoStatement::semantic()\n");
     ident = fixupLabelName(sc, ident);
 
+    this->lastVar = sc->lastVar;
+    this->fd = sc->func;
     tf = sc->tf;
     label = fd->searchLabel(ident);
     if (!label->statement && sc->fes)
     {
         /* Either the goto label is forward referenced or it
          * is in the function that the enclosing foreach is in.
-         * Can't know yet, so wrap the goto in a compound statement
+         * Can't know yet, so wrap the goto in a scope statement
          * so we can patch it later, and add it to a 'look at this later'
          * list.
          */
-        Statements *a = new Statements();
-        CompoundStatement *s;
-
-        a->push(this);
-        s = new CompoundStatement(loc, a);
-        sc->fes->gotos->push(s);         // 'look at this later' list
-        return s;
+        ScopeStatement *ss = new ScopeStatement(loc, this);
+        sc->fes->gotos->push(ss);       // 'look at this later' list
+        return ss;
     }
-    if (label->statement && label->statement->tf != sc->tf)
+
+    // Add to fwdref list to check later
+    if (!label->statement)
+    {
+        if (!fd->gotos)
+            fd->gotos = new GotoStatements();
+        fd->gotos->push(this);
+    }
+    else if (checkLabel())
+        return new ErrorStatement();
+
+    return this;
+}
+
+bool GotoStatement::checkLabel()
+{
+    if (!label->statement)
+    {
+        error("label '%s' is undefined", label->toChars());
+        return true;
+    }
+
+    if (label->statement->tf != tf)
     {
         error("cannot goto in or out of finally block");
-        return new ErrorStatement();
+        return true;
     }
-    return this;
+
+    VarDeclaration *vd = label->statement->lastVar;
+    if (!vd || vd->isDataseg() || (vd->storage_class & STCmanifest))
+        return false;
+
+    VarDeclaration *last = lastVar;
+    while (last && last != vd)
+        last = last->lastVar;
+    if (last == vd)
+    {
+        // All good, the label's scope has no variables
+    }
+    else if (vd->ident == Id::withSym)
+    {
+        error("goto skips declaration of with temporary at %s", vd->loc.toChars());
+        return true;
+    }
+    else
+    {
+        error("goto skips declaration of variable %s at %s", vd->toPrettyChars(), vd->loc.toChars());
+        return true;
+    }
+
+    return false;
 }
 
 int GotoStatement::blockExit(bool mustNotThrow)
@@ -5091,6 +5177,7 @@ LabelStatement::LabelStatement(Loc loc, Identifier *ident, Statement *statement)
     this->statement = statement;
     this->tf = NULL;
     this->gotoTarget = NULL;
+    this->lastVar = NULL;
     this->lblock = NULL;
     this->fwdrefs = NULL;
 }
@@ -5102,13 +5189,14 @@ Statement *LabelStatement::syntaxCopy()
 }
 
 Statement *LabelStatement::semantic(Scope *sc)
-{   LabelDsymbol *ls;
+{
     FuncDeclaration *fd = sc->parent->isFuncDeclaration();
 
+    this->lastVar = sc->lastVar;
     //printf("LabelStatement::semantic()\n");
     ident = fixupLabelName(sc, ident);
 
-    ls = fd->searchLabel(ident);
+    LabelDsymbol *ls = fd->searchLabel(ident);
     if (ls->statement)
     {
         error("Label '%s' already defined", ls->toChars());
@@ -5146,10 +5234,10 @@ Statements *LabelStatement::flatten(Scope *sc)
             {
                 a->push(new ExpStatement(loc, (Expression *)NULL));
             }
-            Statement *s = (*a)[0];
 
-            s = new LabelStatement(loc, ident, s);
-            (*a)[0] = s;
+            // reuse 'this' LabelStatement
+            this->statement = (*a)[0];
+            (*a)[0] = this;
         }
     }
 
@@ -5196,8 +5284,8 @@ AsmStatement::AsmStatement(Loc loc, Token *tokens)
     this->tokens = tokens;
     asmcode = NULL;
     asmalign = 0;
-    refparam = FALSE;
-    naked = FALSE;
+    refparam = false;
+    naked = false;
     regs = 0;
 }
 

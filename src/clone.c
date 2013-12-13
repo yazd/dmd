@@ -76,6 +76,7 @@ FuncDeclaration *AggregateDeclaration::hasIdentityOpAssign(Scope *sc)
         unsigned oldspec = global.speculativeGag;   // template opAssign fbody makes it.
         global.speculativeGag = global.gag;
         sc = sc->push();
+        sc->tinst = NULL;
         sc->speculative = true;
 
         for (size_t i = 0; i < 2; i++)
@@ -130,9 +131,7 @@ int StructDeclaration::needOpAssign()
      */
     for (size_t i = 0; i < fields.dim; i++)
     {
-        Dsymbol *s = fields[i];
-        VarDeclaration *v = s->isVarDeclaration();
-        assert(v && v->isField());
+        VarDeclaration *v = fields[i];
         if (v->storage_class & STCref)
             continue;
         Type *tv = v->type->baseElemOf();
@@ -196,15 +195,17 @@ FuncDeclaration *StructDeclaration::buildOpAssign(Scope *sc)
     if (dtor || postblit)
     {
         if (dtor)
+        {
             stc = mergeFuncAttrs(stc, dtor->storage_class);
+            if (stc & STCsafe)
+                stc = (stc & ~STCsafe) | STCtrusted;
+        }
     }
     else
     {
         for (size_t i = 0; i < fields.dim; i++)
         {
-            Dsymbol *s = fields[i];
-            VarDeclaration *v = s->isVarDeclaration();
-            assert(v && v->isField());
+            VarDeclaration *v = fields[i];
             if (v->storage_class & STCref)
                 continue;
             Type *tv = v->type->baseElemOf();
@@ -241,7 +242,7 @@ FuncDeclaration *StructDeclaration::buildOpAssign(Scope *sc)
         {
             tmp = new VarDeclaration(loc, type, idtmp, new VoidInitializer(loc));
             tmp->noscope = 1;
-            tmp->storage_class |= STCctfe;
+            tmp->storage_class |= STCtemp | STCctfe;
             e = new DeclarationExp(loc, tmp);
             ec = new AssignExp(loc,
                 new VarExp(loc, tmp),
@@ -272,9 +273,7 @@ FuncDeclaration *StructDeclaration::buildOpAssign(Scope *sc)
         //printf("\tmemberwise copy\n");
         for (size_t i = 0; i < fields.dim; i++)
         {
-            Dsymbol *s = fields[i];
-            VarDeclaration *v = s->isVarDeclaration();
-            assert(v && v->isField());
+            VarDeclaration *v = fields[i];
             // this.v = s.v;
             AssignExp *ec = new AssignExp(loc,
                 new DotVarExp(loc, new ThisExp(loc), v, 0),
@@ -305,7 +304,7 @@ FuncDeclaration *StructDeclaration::buildOpAssign(Scope *sc)
         Dsymbols *decldefs = new Dsymbols();
         decldefs->push(s);
         TemplateDeclaration *tempdecl =
-            new TemplateDeclaration(assign->loc, fop->ident, tpl, NULL, decldefs, 0);
+            new TemplateDeclaration(assign->loc, fop->ident, tpl, NULL, decldefs);
         s = tempdecl;
     }
 #endif
@@ -360,9 +359,7 @@ int StructDeclaration::needOpEquals()
      */
     for (size_t i = 0; i < fields.dim; i++)
     {
-        Dsymbol *s = fields[i];
-        VarDeclaration *v = s->isVarDeclaration();
-        assert(v && v->isField());
+        VarDeclaration *v = fields[i];
         if (v->storage_class & STCref)
             continue;
         Type *tv = v->type->toBasetype();
@@ -419,6 +416,7 @@ FuncDeclaration *AggregateDeclaration::hasIdentityOpEquals(Scope *sc)
             unsigned oldspec = global.speculativeGag;   // template opAssign fbody makes it.
             global.speculativeGag = global.gag;
             sc = sc->push();
+            sc->tinst = NULL;
             sc->speculative = true;
 
             for (size_t j = 0; j < 2; j++)
@@ -768,9 +766,7 @@ FuncDeclaration *StructDeclaration::buildPostBlit(Scope *sc)
     Expression *e = NULL;
     for (size_t i = 0; i < fields.dim; i++)
     {
-        Dsymbol *s = fields[i];
-        VarDeclaration *v = s->isVarDeclaration();
-        assert(v && v->isField());
+        VarDeclaration *v = fields[i];
         if (v->storage_class & STCref)
             continue;
         Type *tv = v->type->toBasetype();
@@ -881,9 +877,7 @@ FuncDeclaration *AggregateDeclaration::buildDtor(Scope *sc)
     Expression *e = NULL;
     for (size_t i = 0; i < fields.dim; i++)
     {
-        Dsymbol *s = fields[i];
-        VarDeclaration *v = s->isVarDeclaration();
-        assert(v && v->isField());
+        VarDeclaration *v = fields[i];
         if (v->storage_class & STCref)
             continue;
         Type *tv = v->type->toBasetype();

@@ -34,11 +34,11 @@ int findCondition(Strings *ids, Identifier *ident)
             const char *id = (*ids)[i];
 
             if (strcmp(id, ident->toChars()) == 0)
-                return TRUE;
+                return true;
         }
     }
 
-    return FALSE;
+    return false;
 }
 
 /* ============================================================ */
@@ -187,6 +187,7 @@ bool VersionCondition::isPredefined(const char *ident)
         "ARM_SoftFP",
         "ARM_HardFloat",
         "AArch64",
+        "Epiphany",
         "PPC",
         "PPC_SoftFloat",
         "PPC_HardFloat",
@@ -369,9 +370,9 @@ int StaticIfCondition::include(Scope *sc, ScopeDsymbol *s)
         {
             goto Lerror;
         }
-        else if (e->isBool(TRUE))
+        else if (e->isBool(true))
             inc = 1;
-        else if (e->isBool(FALSE))
+        else if (e->isBool(false))
             inc = 2;
         else
         {

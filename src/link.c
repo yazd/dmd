@@ -22,13 +22,13 @@
 #endif
 #endif
 
-#if linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#if __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
 #include        <sys/types.h>
 #include        <sys/wait.h>
 #include        <unistd.h>
 #endif
 
-#if linux || __APPLE__
+#if __linux__ || __APPLE__
     #define HAS_POSIX_SPAWN 1
     #include        <spawn.h>
     #if __APPLE__
@@ -83,7 +83,7 @@ void writeFilename(OutBuffer *buf, const char *filename)
     writeFilename(buf, filename, strlen(filename));
 }
 
-#if linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#if __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
 
 /*****************************
  * As it forwards the linker error message to stderr, checks for the presence
@@ -106,7 +106,7 @@ int findNoMainError(int fd)
     if (stream == NULL) return -1;
 
     const size_t len = 64 * 1024 - 1;
-    char buffer[len + 1] = {0}; // + '\0'
+    char buffer[len + 1]; // + '\0'
     size_t beg = 0, end = len;
 
     bool nmeFound = false;
@@ -430,7 +430,7 @@ int runLINK()
         }
         return status;
     }
-#elif linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#elif __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
     pid_t childpid;
     int status;
 
@@ -448,7 +448,7 @@ int runLINK()
     // add the "-dynamiclib" flag
     if (global.params.dll)
         argv.push("-dynamiclib");
-#elif linux || __FreeBSD__ || __OpenBSD__ || __sun
+#elif __linux__ || __FreeBSD__ || __OpenBSD__ || __sun
     if (global.params.dll)
         argv.push("-shared");
 #endif
@@ -459,6 +459,36 @@ int runLINK()
     if (global.params.exefile)
     {
         argv.push(global.params.exefile);
+    }
+    else if (global.params.run)
+    {
+#if 1
+        char name[L_tmpnam + 14 + 1];
+        strcpy(name, P_tmpdir);
+        strcat(name, "/dmd_runXXXXXX");
+        int fd = mkstemp(name);
+        if (fd == -1)
+        {   error(Loc(), "error creating temporary file");
+            return 1;
+        }
+        else
+            close(fd);
+        global.params.exefile = mem.strdup(name);
+        argv.push(global.params.exefile);
+#else
+        /* The use of tmpnam raises the issue of "is this a security hole"?
+         * The hole is that after tmpnam and before the file is opened,
+         * the attacker modifies the file system to get control of the
+         * file with that name. I do not know if this is an issue in
+         * this context.
+         * We cannot just replace it with mkstemp, because this name is
+         * passed to the linker that actually opens the file and writes to it.
+         */
+        char s[L_tmpnam + 1];
+        char *n = tmpnam(s);
+        global.params.exefile = mem.strdup(n);
+        argv.push(global.params.exefile);
+#endif
     }
     else
     {   // Generate exe file name from first obj name
@@ -600,7 +630,7 @@ int runLINK()
 //    argv.push("-ldruntime");
     argv.push("-lpthread");
     argv.push("-lm");
-#if linux
+#if __linux__
     // Changes in ld for Ubuntu 11.10 require this to appear after phobos2
     argv.push("-lrt");
 #endif
@@ -825,7 +855,7 @@ int runProgram()
         ex = global.params.exefile;
     // spawnlp returns intptr_t in some systems, not int
     return spawnv(0,ex,argv.tdata());
-#elif linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#elif __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
     pid_t childpid;
     int status;
 

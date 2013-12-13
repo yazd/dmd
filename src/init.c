@@ -287,13 +287,14 @@ Initializer *StructInitializer::semantic(Scope *sc, Type *t, NeedInterpret needI
         ExpInitializer *ie = new ExpInitializer(loc, e);
         return ie->semantic(sc, t, needInterpret);
     }
-    else if (t->ty == Tdelegate && value.dim == 0)
+    else if ((t->ty == Tdelegate || t->ty == Tpointer && t->nextOf()->ty == Tfunction) && value.dim == 0)
     {
+        TOK tok = (t->ty == Tdelegate) ? TOKdelegate : TOKfunction;
         /* Rewrite as empty delegate literal { }
          */
         Parameters *arguments = new Parameters;
         Type *tf = new TypeFunction(arguments, NULL, 0, LINKd);
-        FuncLiteralDeclaration *fd = new FuncLiteralDeclaration(loc, Loc(), tf, TOKdelegate, NULL);
+        FuncLiteralDeclaration *fd = new FuncLiteralDeclaration(loc, Loc(), tf, tok, NULL);
         fd->fbody = new CompoundStatement(loc, new Statements());
         fd->endloc = loc;
         Expression *e = new FuncExp(loc, fd);
@@ -387,12 +388,9 @@ Initializer *ArrayInitializer::semantic(Scope *sc, Type *t, NeedInterpret needIn
     if (sem)                            // if semantic() already run
         return this;
     sem = 1;
-    type = t;
-    Initializer *aa = NULL;
     t = t->toBasetype();
     switch (t->ty)
     {
-        case Tpointer:
         case Tsarray:
         case Tarray:
             break;
@@ -402,14 +400,26 @@ Initializer *ArrayInitializer::semantic(Scope *sc, Type *t, NeedInterpret needIn
             break;
 
         case Taarray:
-            // was actually an associative array literal
-            aa = new ExpInitializer(loc, toAssocArrayLiteral());
-            return aa->semantic(sc, t, needInterpret);
+        case Tstruct:   // consider implicit constructor call
+        {
+            Expression *e;
+            if (t->ty == Taarray || isAssociativeArray())
+                e = toAssocArrayLiteral();
+            else
+                e = toExpression();
+            ExpInitializer *ei = new ExpInitializer(e->loc, e);
+            return ei->semantic(sc, t, needInterpret);
+        }
+        case Tpointer:
+            if (t->nextOf()->ty != Tfunction)
+                break;
 
         default:
-            error(loc, "cannot use array to initialize %s", type->toChars());
+            error(loc, "cannot use array to initialize %s", t->toChars());
             goto Lerr;
     }
+
+    type = t;
 
     length = 0;
     for (size_t i = 0; i < index.dim; i++)
@@ -509,6 +519,11 @@ Expression *ArrayInitializer::toExpression(Type *tx)
         switch (t->ty)
         {
            case Tsarray:
+               edim = (size_t)((TypeSArray *)t)->dim->toInteger();
+               break;
+
+           case Tvector:
+               t = ((TypeVector *)t)->basetype;
                edim = (size_t)((TypeSArray *)t)->dim->toInteger();
                break;
 
@@ -808,7 +823,7 @@ Initializer *ExpInitializer::semantic(Scope *sc, Type *t, NeedInterpret needInte
     exp = resolveProperties(sc, exp);
     if (needInterpret) sc = sc->endCTFE();
     if (exp->op == TOKerror)
-        return this;
+        return new ErrorInitializer();
 
     int olderrors = global.errors;
     if (needInterpret)

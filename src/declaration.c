@@ -45,7 +45,8 @@ void checkFrameAccess(Loc loc, Scope *sc, AggregateDeclaration *ad)
             {
                 // Is it better moving this check to AggregateDeclaration:semantic?
                 for (size_t i = 0; i < ad->fields.dim; i++)
-                {   VarDeclaration *vd = ad->fields[i]->isVarDeclaration();
+                {
+                    VarDeclaration *vd = ad->fields[i];
                     if (vd)
                         if (AggregateDeclaration *ad2 = isAggregate(vd->type))
                             if (ad2->isStructDeclaration())
@@ -726,12 +727,13 @@ VarDeclaration::VarDeclaration(Loc loc, Type *type, Identifier *id, Initializer 
     this->loc = loc;
     offset = 0;
     noscope = 0;
-    isargptr = FALSE;
+    isargptr = false;
     alignment = 0;
     ctorinit = 0;
     aliassym = NULL;
     onstack = 0;
     canassign = 0;
+    lastVar = NULL;
     ctfeAdrOnStack = -1;
     rundtor = NULL;
     edtor = NULL;
@@ -1009,7 +1011,7 @@ void VarDeclaration::semantic(Scope *sc)
                     Identifier *id = Lexer::uniqueId("__tup");
                     ExpInitializer *ei = new ExpInitializer(e->loc, e);
                     VarDeclaration *v = new VarDeclaration(loc, NULL, id, ei);
-                    v->storage_class = STCctfe | STCref | STCforeach;
+                    v->storage_class = STCtemp | STCctfe | STCref | STCforeach;
                     VarExp *ve = new VarExp(loc, v);
                     ve->type = e->type;
 
@@ -1097,7 +1099,7 @@ Lnomatch:
                 ti = init ? init->syntaxCopy() : NULL;
 
             VarDeclaration *v = new VarDeclaration(loc, arg->type, id, ti);
-            v->storage_class |= storage_class;
+            v->storage_class |= STCtemp | storage_class;
             if (arg->storageClass & STCparameter)
                 v->storage_class |= arg->storageClass;
             //printf("declaring field %s of type %s\n", v->toChars(), v->type->toChars());
@@ -1179,8 +1181,8 @@ Lnomatch:
             if (tbn->ty == Tstruct && ((TypeStruct *)tbn)->sym->noDefaultCtor ||
                 tbn->ty == Tclass  && ((TypeClass  *)tbn)->sym->noDefaultCtor)
             {
-                if (!isThisDeclaration())
-                    aad->noDefaultCtor = TRUE;
+                if (!isThisDeclaration() && !init)
+                    aad->noDefaultCtor = true;
             }
 #else
             if (storage_class & (STCconst | STCimmutable) && init)
@@ -1197,8 +1199,8 @@ Lnomatch:
                 if ((tbn->ty == Tstruct && ((TypeStruct *)tbn)->sym->noDefaultCtor) ||
                     (tbn->ty == Tclass  && ((TypeClass  *)tbn)->sym->noDefaultCtor))
                 {
-                    if (!isThisDeclaration())
-                        aad->noDefaultCtor = TRUE;
+                    if (!isThisDeclaration() && !init)
+                        aad->noDefaultCtor = true;
                 }
             }
 #endif
@@ -1382,15 +1384,7 @@ Lnomatch:
         sc = sc->push();
         sc->stc &= ~(STC_TYPECTOR | STCpure | STCnothrow | STCref | STCdisable);
 
-        ArrayInitializer *ai = init->isArrayInitializer();
-        if (ai && tb->ty == Taarray)
-        {
-            Expression *e = ai->toAssocArrayLiteral();
-            init = new ExpInitializer(e->loc, e);
-        }
-
         ExpInitializer *ei = init->isExpInitializer();
-
         if (ei && isScope())
         {
             // See if initializer is a NewExp that can be allocated on the stack
@@ -1425,7 +1419,12 @@ Lnomatch:
                 //printf("fd = '%s', var = '%s'\n", fd->toChars(), toChars());
                 if (!ei)
                 {
-                    Expression *e = init->toExpression();
+                    ArrayInitializer *ai = init->isArrayInitializer();
+                    Expression *e;
+                    if (ai && (tb->ty == Taarray || tb->ty == Tstruct && ai->isAssociativeArray()))
+                        e = ai->toAssocArrayLiteral();
+                    else
+                        e = init->toExpression();
                     if (!e)
                     {
                         // Run semantic, but don't need to interpret
@@ -1876,7 +1875,8 @@ void VarDeclaration::checkNestedReference(Scope *sc, Loc loc)
                 {
                     if (i == fdv->closureVars.dim)
                     {
-                        fdv->closureVars.push(this);
+                        if (!sc->intypeof && !(sc->flags & SCOPEcompile))
+                            fdv->closureVars.push(this);
                         break;
                     }
                     if (fdv->closureVars[i] == this)

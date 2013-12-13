@@ -369,10 +369,10 @@ void ClassDeclaration::semantic(Scope *sc)
                         goto L7;
                     }
                 }
-                if (!tc->sym->symtab || tc->sym->sizeok == SIZEOKnone)
-                {   // Try to resolve forward reference
-                    if (/*doAncestorsSemantic == SemanticIn &&*/ tc->sym->scope)
-                        tc->sym->semantic(NULL);
+                if (tc->sym->scope)
+                {
+                    // Try to resolve forward reference
+                    tc->sym->semantic(NULL);
                 }
 
                 if (tc->sym->symtab && tc->sym->scope == NULL)
@@ -443,10 +443,10 @@ void ClassDeclaration::semantic(Scope *sc)
                     error("inherits from duplicate interface %s", b2->base->toChars());
             }
 
-            if (!tc->sym->symtab)
-            {   // Try to resolve forward reference
-                if (/*doAncestorsSemantic == SemanticIn &&*/ tc->sym->scope)
-                    tc->sym->semantic(NULL);
+            if (tc->sym->scope)
+            {
+                // Try to resolve forward reference
+                tc->sym->semantic(NULL);
             }
 
             b->base = tc->sym;
@@ -658,8 +658,8 @@ void ClassDeclaration::semantic(Scope *sc)
         // Unwind what we did, and defer it for later
         for (size_t i = 0; i < fields.dim; i++)
         {
-            if (VarDeclaration *v = fields[i])
-                v->offset = 0;
+            VarDeclaration *v = fields[i];
+            v->offset = 0;
         }
         fields.setDim(0);
         structsize = 0;
@@ -693,7 +693,7 @@ void ClassDeclaration::semantic(Scope *sc)
         // A class object is always created by constructor, so this check is legitimate.
         for (size_t i = 0; i < fields.dim; i++)
         {
-            VarDeclaration *v = fields[i]->isVarDeclaration();
+            VarDeclaration *v = fields[i];
             if (v->storage_class & STCnodefaultctor)
                 ::error(v->loc, "field %s must be initialized in constructor", v->toChars());
         }
@@ -1350,10 +1350,10 @@ void InterfaceDeclaration::semantic(Scope *sc)
                 baseclasses->remove(i);
                 continue;
             }
-            if (!b->base->symtab)
-            {   // Try to resolve forward reference
-                if (doAncestorsSemantic == SemanticIn && b->base->scope)
-                    b->base->semantic(NULL);
+            if (b->base->scope)
+            {
+                // Try to resolve forward reference
+                b->base->semantic(NULL);
             }
             if (!b->base->symtab || b->base->scope || b->base->inuse)
             {

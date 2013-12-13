@@ -1168,6 +1168,14 @@ void test61()
 
 /***************************************************/
 
+void test9577()
+{
+    static int function(int)[] foo = [x => x];
+    foo[0](0);
+}
+
+/***************************************************/
+
 int[3] foo62(int[3] a)
 {
     a[1]++;
@@ -1480,6 +1488,15 @@ void test74()
     C74 c = null;
     a = b;
     a = c;
+}
+
+/***************************************************/
+
+void test9212()
+{
+    int[int] aa;
+    foreach (const key, const val; aa) {}
+    foreach (size_t key, size_t val; aa) {}
 }
 
 /***************************************************/
@@ -5886,6 +5903,39 @@ void test8395()
 }
 
 /***************************************************/
+// 8396
+
+void test8396()
+{
+    static int g;
+
+    static extern(C) int bar(int a, int b)
+    {
+        //printf("a = %d, b = %d\n", a, b);
+        assert(b - a == 1);
+        return ++g;
+    }
+    static auto getFunc(int n)
+    {
+        assert(++g == n);
+        return &bar;
+    }
+
+    static struct Tuple { int _a, _b; }
+    static Tuple foo(int n)
+    {
+        assert(++g == n);
+        return Tuple(1, 2);
+    }
+
+    g = 0;
+    assert(bar(foo(1).tupleof) == 2);
+
+    g = 0;
+    assert(getFunc(1)(foo(2).tupleof) == 3);
+}
+
+/***************************************************/
 
 enum E160 : ubyte { jan = 1 }
 
@@ -6141,7 +6191,7 @@ void test161()
 void test8819()
 {
     void[0] sa0 = (void[0]).init;
-    assert(sa0.ptr is null);
+    assert(sa0.ptr !is null); // 7175 - ptr should not be null
 
     void[1] sa1 = (void[1]).init;
     assert((cast(ubyte*)sa1.ptr)[0] == 0);
@@ -7010,10 +7060,12 @@ int main()
     test159();
     test8283();
     test8395();
+    test8396();
     test160();
     test8665();
     test8108();
     test8360();
+    test9577();
     test6141();
     test8526();
     test161();

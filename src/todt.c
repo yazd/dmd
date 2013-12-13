@@ -125,7 +125,7 @@ dt_t *ArrayInitializer::toDt()
             tadim = ta->dim->toInteger();
             if (dim < tadim)
             {
-                if (edefault->isBool(FALSE))
+                if (edefault->isBool(false))
                     // pad out end of array
                     pdtend = dtnzeros(pdtend, size * (tadim - dim));
                 else
@@ -665,6 +665,12 @@ dt_t **Type::toDt(dt_t **pdt)
     //printf("Type::toDt()\n");
     Expression *e = defaultInit();
     return e->toDt(pdt);
+}
+
+dt_t **TypeVector::toDt(dt_t **pdt)
+{
+    assert(basetype->ty == Tsarray);
+    return ((TypeSArray *)basetype)->toDtElem(pdt, NULL);
 }
 
 dt_t **TypeSArray::toDt(dt_t **pdt)

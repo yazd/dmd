@@ -15,7 +15,7 @@
 #include <limits.h>
 #include <string.h>
 
-#if linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#if __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
 #include <errno.h>
 #endif
 
@@ -116,6 +116,15 @@ void Global::init()
     dll_ext  = "so";
 #elif TARGET_OSX
     dll_ext = "dylib";
+#else
+#error "fix this"
+#endif
+
+#if TARGET_WINDOS
+    run_noext = false;
+#elif TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_SOLARIS
+    // Allow 'script' D source files to have no extension.
+    run_noext = true;
 #else
 #error "fix this"
 #endif
@@ -256,15 +265,9 @@ void verrorPrint(Loc loc, const char *header, const char *format, va_list ap,
         fprintf(stderr, "%s ", p1);
     if (p2)
         fprintf(stderr, "%s ", p2);
-#if _MSC_VER
-    // MS doesn't recognize %zu format
     OutBuffer tmp;
     tmp.vprintf(format, ap);
-    fprintf(stderr, "%s", tmp.toChars());
-#else
-    vfprintf(stderr, format, ap);
-#endif
-    fprintf(stderr, "\n");
+    fprintf(stderr, "%s\n", tmp.toChars());
     fflush(stderr);
 }
 
@@ -378,7 +381,7 @@ Usage:\n\
   -debuglib=name    set symbolic debug library to name\n\
   -defaultlib=name  set default library to name\n\
   -deps          print module dependencies (imports/file/version/debug/lib)\n\
-  -deps=filename write module dependencies to filename (only imports - deprecated)\n%s\
+  -deps=filename write module dependencies to filename (only imports)\n%s\
   -g             add symbolic debug info\n\
   -gc            add symbolic debug info, pretend to be C\n\
   -gs            always emit stack frame\n\
@@ -426,14 +429,6 @@ Usage:\n\
 
 extern signed char tyalignsize[];
 
-#if _WIN32 && __DMC__
-extern "C"
-{
-    extern int _xi_a;
-    extern int _end;
-}
-#endif
-
 static Module *entrypoint = NULL;
 
 /************************************
@@ -451,7 +446,7 @@ void genCmain(Scope *sc)
     /* The D code to be generated is provided as D source code in the form of a string.
      * Note that Solaris, for unknown reasons, requires both a main() and an _main()
      */
-    static utf8_t code[] = "extern(C) {\n\
+    static const utf8_t cmaincode[] = "extern(C) {\n\
         int _d_run_main(int argc, char **argv, void* mainFunc);\n\
         int _Dmain(char[][] args);\n\
         int main(int argc, char **argv) { return _d_run_main(argc, argv, &_Dmain); }\n\
@@ -462,7 +457,7 @@ void genCmain(Scope *sc)
     Identifier *id = Id::entrypoint;
     Module *m = new Module("__entrypoint.d", id, 0, 0);
 
-    Parser p(m, code, sizeof(code) / sizeof(code[0]), 0);
+    Parser p(m, cmaincode, strlen((const char *)cmaincode), 0);
     p.scanloc = Loc();
     p.nextToken();
     m->members = p.parseModule();
@@ -482,12 +477,6 @@ void genCmain(Scope *sc)
 
 int tryMain(size_t argc, const char *argv[])
 {
-    mem.init();                         // initialize storage allocator
-    mem.setStackBottom(&argv);
-#if _WIN32 && __DMC__
-    mem.addroots((char *)&_xi_a, (char *)&_end);
-#endif
-
     Strings files;
     Strings libmodules;
     size_t argcstart = argc;
@@ -594,7 +583,7 @@ int tryMain(size_t argc, const char *argv[])
 
 #if _WIN32
     inifilename = inifile(argv[0], "sc.ini", "Environment");
-#elif linux || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
+#elif __linux__ || __APPLE__ || __FreeBSD__ || __OpenBSD__ || __sun
     inifilename = inifile(argv[0], "dmd.conf", "Environment");
 #else
 #error "fix this"
@@ -609,7 +598,8 @@ int tryMain(size_t argc, const char *argv[])
     is64bit = parse_arch(dflags_argc, dflags_argv, is64bit);
     global.params.is64bit = is64bit;
 
-    inifile(argv[0], inifilename, is64bit ? "Environment64" : "Environment32");
+    const char *envsec = is64bit ? "Environment64" : "Environment32";
+    inifile(argv[0], inifilename, envsec);
 
     getenv_setargv("DFLAGS", &argc, &argv);
 
@@ -1005,7 +995,7 @@ Language changes listed by -transition=id:\n\
 #if _WIN32
                 browse("http://dlang.org/dmd-windows.html");
 #endif
-#if linux
+#if __linux__
                 browse("http://dlang.org/dmd-linux.html");
 #endif
 #if __APPLE__
@@ -1069,7 +1059,7 @@ Language changes listed by -transition=id:\n\
 
     if(global.params.is64bit != is64bit)
         error(Loc(), "the architecture must not be changed in the %s section of %s",
-              is64bit ? "Environment64" : "Environment32", inifilename);
+              envsec, inifilename);
 
     // Target uses 64bit pointers.
     global.params.isLP64 = global.params.is64bit;
@@ -1141,15 +1131,7 @@ Language changes listed by -transition=id:\n\
         global.params.objname = NULL;
 
         // Haven't investigated handling these options with multiobj
-        if (!global.params.cov && !global.params.trace
-#if 0 && TARGET_WINDOS
-            /* multiobj causes class/struct debug info to be attached to init-data,
-             * but this will not be linked into the executable, so this info is lost.
-             * Bugzilla 4014
-             */
-            && !global.params.symdebug
-#endif
-           )
+        if (!global.params.cov && !global.params.trace)
             global.params.multiobj = 1;
     }
     else if (global.params.run)
@@ -1630,7 +1612,7 @@ Language changes listed by -transition=id:\n\
 
         if (name && name[0] == '-' && name[1] == 0)
         {   // Write to stdout; assume it succeeds
-            int n = fwrite(buf.data, 1, buf.offset, stdout);
+            size_t n = fwrite(buf.data, 1, buf.offset, stdout);
             assert(n == buf.offset);        // keep gcc happy about return values
         }
         else

@@ -243,6 +243,22 @@ template _ElemType(T) {
 }
 
 /**********************************/
+// 5185
+
+class C5185(V)
+{
+    void f()
+    {
+        C5185!(C5185!(int)) c;
+    }
+}
+
+void test5185()
+{
+    C5185!(C5185!(int)) c;
+}
+
+/**********************************/
 // 5893
 
 class C5893
@@ -1914,6 +1930,42 @@ void test9038()
 }
 
 /**********************************/
+// 9050
+
+struct A9050(T) {}
+
+struct B9050(T)
+{
+    void f() { foo9050(A9050!int()); }
+}
+
+auto foo9050()(A9050!int base) pure
+{
+    return B9050!int();
+}
+
+auto s9050 = foo9050(A9050!int());
+
+/**********************************/
+// 10936 (dup of 9050)
+
+struct Vec10936(string s)
+{
+    auto foo(string v)()
+    {
+        return Vec10936!(v)();
+    }
+
+    static void bar()
+    {
+        Vec10936!"" v;
+        auto p = v.foo!"sup";
+    }
+}
+
+Vec10936!"" v;
+
+/**********************************/
 // 9076
 
 template forward9076(args...)
@@ -2886,6 +2938,41 @@ void test11271()
 }
 
 /******************************************/
+// 11533
+
+struct S11533
+{
+    void put(alias fun)() { fun!int(); }
+}
+void test11533a()
+{
+    static void foo(T)() {}
+    S11533 s;
+    s.put!foo();
+}
+
+void test11533b()
+{
+    static void bar(alias fun)() { fun(); }
+    void nested() {}
+    bar!nested();
+}
+
+void test11533c()
+{
+    static struct Foo(alias fun)
+    {
+        auto call() { return fun(); }
+    }
+    int var = 1;
+    auto getVar() { return var; }
+    Foo!getVar foo;
+    assert(foo.call() == var);
+    var += 1;
+    assert(foo.call() == var);
+}
+
+/******************************************/
 
 int main()
 {
@@ -2977,6 +3064,9 @@ int main()
     test10811();
     test10969();
     test11271();
+    test11533a();
+    test11533b();
+    test11533c();
 
     printf("Success\n");
     return 0;

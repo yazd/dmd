@@ -279,7 +279,14 @@ ArrayOp *buildArrayOp(Identifier *ident, BinExp *exp, Scope *sc, Loc loc)
     sc->linkage = LINKc;
     fd->semantic(sc);
     fd->semantic2(sc);
+    unsigned errors = global.startGagging();
     fd->semantic3(sc);
+    if (global.endGagging(errors))
+    {
+        fd->type = Type::terror;
+        fd->errors = true;
+        fd->fbody = NULL;
+    }
     sc->pop();
 
     if (op->cFunc)
@@ -307,6 +314,7 @@ bool isArrayOpValid(Expression *e)
     }
     Type *tb = e->type->toBasetype();
 
+    BinExp *be;
     if ( (tb->ty == Tarray) || (tb->ty == Tsarray) )
     {
         switch (e->op)
@@ -330,7 +338,12 @@ bool isArrayOpValid(Expression *e)
             case TOKorass:
             case TOKpow:
             case TOKpowass:
-                 return isArrayOpValid(((BinExp *)e)->e1) && isArrayOpValid(((BinExp *)e)->e2);
+                be = (BinExp *)e;
+                return isArrayOpValid(be->e1) && isArrayOpValid(be->e2);
+
+            case TOKconstruct:
+                be = (BinExp *)e;
+                return be->e1->op == TOKslice && isArrayOpValid(be->e2);
 
             case TOKcall:
                  return false; // TODO: Decide if [] is required after arrayop calls.
@@ -362,15 +375,9 @@ Expression *BinExp::arrayOp(Scope *sc)
         error("Cannot perform array operations on void[] arrays");
         return new ErrorExp();
     }
-    if (!tbn->isscalar())
+    if (!isArrayOpValid(this))
     {
-        error("'%s' each element is not a scalar, it is a %s", toChars(), tbn->toChars());
-        return new ErrorExp();
-    }
-
-    if (!isArrayOpValid(e2))
-    {
-        e2->error("invalid array operation %s (did you forget a [] ?)", toChars());
+        error("invalid array operation %s (did you forget a [] ?)", toChars());
         return new ErrorExp();
     }
 
@@ -399,6 +406,20 @@ Expression *BinExp::arrayOp(Scope *sc)
     if (!op)
         op = buildArrayOp(ident, this, sc, loc);
 
+    if (op->dFunc && op->dFunc->errors)
+    {
+        const char *fmt;
+        if (tbn->ty == Tstruct || tbn->ty == Tclass)
+            fmt = "invalid array operation '%s' because %s doesn't support necessary arithmetic operations";
+        else if (!tbn->isscalar())
+            fmt = "invalid array operation '%s' because %s is not a scalar type";
+        else
+            fmt = "invalid array operation '%s' for element type %s";
+
+        error(fmt, toChars(), tbn->toChars());
+        return new ErrorExp();
+    }
+
     *pOp = op;
 
     FuncDeclaration *fd = op->cFunc ? op->cFunc : op->dFunc;
@@ -420,6 +441,10 @@ Expression *BinAssignExp::arrayOp(Scope *sc)
     {
         error("slice %s is not mutable", e1->toChars());
         return new ErrorExp();
+    }
+    if (e1->op == TOKarrayliteral)
+    {
+        return e1->modifiableLvalue(sc, e1);
     }
 
     return BinExp::arrayOp(sc);

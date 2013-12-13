@@ -399,7 +399,7 @@ public:
     FuncDeclaration *func;      // function we're lexically in
 
     Statements *cases;          // put breaks, continues, gotos and returns here
-    CompoundStatements *gotos;  // forward referenced goto's go here
+    ScopeStatements *gotos;     // forward referenced goto's go here
 
     ForeachStatement(Loc loc, TOK op, Parameters *arguments, Expression *aggr, Statement *body);
     Statement *syntaxCopy();
@@ -886,10 +886,13 @@ public:
     Identifier *ident;
     LabelDsymbol *label;
     TryFinallyStatement *tf;
+    VarDeclaration *lastVar;
+    FuncDeclaration *fd;
 
     GotoStatement(Loc loc, Identifier *ident);
     Statement *syntaxCopy();
     Statement *semantic(Scope *sc);
+    bool checkLabel();
     int blockExit(bool mustNotThrow);
     Expression *interpret(InterState *istate);
     void ctfeCompile(CompiledCtfeFunction *ccf);
@@ -905,6 +908,7 @@ public:
     Statement *statement;
     TryFinallyStatement *tf;
     Statement *gotoTarget;      // interpret
+    VarDeclaration *lastVar;
     block *lblock;              // back end
 
     Blocks *fwdrefs;            // forward references to this LabelStatement

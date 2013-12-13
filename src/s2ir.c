@@ -371,12 +371,8 @@ void GotoStatement::toIR(IRState *irs)
 {
     Blockx *blx = irs->blx;
 
-    if (!label->statement)
-    {   error("label %s is undefined", label->toChars());
-        return;
-    }
-    if (tf != label->statement->tf)
-        error("cannot goto forward out of or into finally block");
+    assert(label->statement);
+    assert(tf == label->statement->tf);
 
     block *bdest = labelToBlock(loc, blx, label, 1);
     if (!bdest)
@@ -437,7 +433,6 @@ void LabelStatement::toIR(IRState *irs)
                 }
 
             }
-            delete fwdrefs;
             fwdrefs = NULL;
         }
     }

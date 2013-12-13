@@ -84,7 +84,7 @@ Module::Module(const char *filename, Identifier *ident, int doDocComment, int do
 
     macrotable = NULL;
     escapetable = NULL;
-    safe = FALSE;
+    safe = false;
     doppelganger = 0;
     cov = NULL;
     covb = NULL;
@@ -93,7 +93,16 @@ Module::Module(const char *filename, Identifier *ident, int doDocComment, int do
     namelen = 0;
 
     srcfilename = FileName::defaultExt(filename, global.mars_ext);
-    if (!FileName::equalsExt(srcfilename, global.mars_ext) &&
+
+    if (global.run_noext && global.params.run &&
+        !FileName::ext(filename) &&
+        FileName::exists(srcfilename) == 0 &&
+        FileName::exists(filename) == 1)
+    {
+        FileName::free(srcfilename);
+        srcfilename = FileName::removeExt(filename);    // just does a mem.strdup(filename)
+    }
+    else if (!FileName::equalsExt(srcfilename, global.mars_ext) &&
         !FileName::equalsExt(srcfilename, global.hdr_ext) &&
         !FileName::equalsExt(srcfilename, "dd"))
     {
@@ -984,7 +993,7 @@ void Module::runDeferredSemantic3()
 
 /************************************
  * Recursively look at every module this module imports,
- * return TRUE if it imports m.
+ * return true if it imports m.
  * Can be used to detect circular imports.
  */
 
@@ -1000,7 +1009,7 @@ int Module::imports(Module *m)
     for (size_t i = 0; i < aimports.dim; i++)
     {   Module *mi = aimports[i];
         if (mi == m)
-            return TRUE;
+            return true;
         if (!mi->insearch)
         {
             mi->insearch = 1;
@@ -1009,7 +1018,7 @@ int Module::imports(Module *m)
                 return r;
         }
     }
-    return FALSE;
+    return false;
 }
 
 /*************************************

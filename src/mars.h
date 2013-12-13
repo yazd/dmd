@@ -241,7 +241,7 @@ struct Compiler
 };
 
 typedef unsigned structalign_t;
-#define STRUCTALIGN_DEFAULT ~0  // magic value means "match whatever the underlying C compiler does"
+#define STRUCTALIGN_DEFAULT ((structalign_t) ~0)  // magic value means "match whatever the underlying C compiler does"
 // other values are all powers of 2
 
 struct Ungag
@@ -264,6 +264,8 @@ struct Global
     const char *hdr_ext;        // for D 'header' import files
     const char *json_ext;       // for JSON files
     const char *map_ext;        // for .map files
+    bool run_noext;             // allow -run sources without extensions.
+
     const char *copyright;
     const char *written;
     const char *main_d;         // dummy filename for dummy main()
@@ -363,13 +365,6 @@ struct Loc
     bool equals(const Loc& loc);
 };
 
-#ifndef GCC_SAFE_DMD
-#undef TRUE
-#define TRUE    1
-#undef FALSE
-#define FALSE   0
-#endif
-
 #define INTERFACE_OFFSET        0       // if 1, put classinfo as first entry
                                         // in interface vtbl[]'s
 #define INTERFACE_VIRTUAL       0       // 1 means if an interface appears
@@ -436,7 +431,7 @@ void halt();
 
 class Dsymbol;
 class Library;
-class File;
+struct File;
 void obj_start(char *srcfile);
 void obj_end(Library *library, File *objfile);
 void obj_append(Dsymbol *s);

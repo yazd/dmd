@@ -2723,6 +2723,15 @@ static assert({
 }());
 
 /**************************************************
+    8365 - block assignment of enum arrays
+**************************************************/
+
+enum E8365 { first = 7, second, third, fourth }
+static assert({ E8365[2] x; return x[0]; }() == E8365.first);
+static assert({ E8365[2][2] x; return x[0][0]; }() == E8365.first);
+static assert({ E8365[2][2][2] x; return x[0][0][0]; }() == E8365.first);
+
+/**************************************************
     4448 - labelled break + continue
 **************************************************/
 
@@ -3188,6 +3197,26 @@ bool bug4021() {
     return true;
 }
 static assert(bug4021());
+
+/**************************************************
+    11629 crash on AA.rehash
+**************************************************/
+
+struct Base11629
+{
+    alias T = ubyte, Char = char;
+    alias String = immutable(Char)[];
+
+    const Char[T] toChar;
+
+    this(int _dummy)
+    {
+        Char[T] toCharTmp = [0:'A'];
+
+        toChar = toCharTmp.rehash;
+    }
+}
+enum ct11629 = Base11629(4);
 
 /**************************************************
     3512 foreach(dchar; string)
@@ -4109,6 +4138,12 @@ int classtest3()
 static assert(classtest3());
 
 /**************************************************
+    11587 AA compare
+**************************************************/
+
+static assert([1:2, 3:4] == [3:4, 1:2]);
+
+/**************************************************
     7147 typeid()
 **************************************************/
 
@@ -4929,6 +4964,23 @@ void emplace9982(Bug9982* chunk, Bug9982 arg)
 
 enum s9982 = Bug9982(3);
 enum p9982 = SS9982(s9982);
+
+/**************************************************
+    11618 dotvar assign through casted pointer
+**************************************************/
+
+struct Tuple11618(T...)
+{
+    T field;
+    alias field this;
+}
+
+static assert({
+    Tuple11618!(immutable dchar) result = void;
+    auto addr = cast(dchar*) &result[0];
+    *addr = dchar.init;
+    return (result[0] == dchar.init);
+}());
 
 /**************************************************
     7143 'is' for classes
@@ -5813,3 +5865,275 @@ string f10782()
 }
 mixin(f10782());
 
+/**************************************************
+    11534 - subtitude inout
+**************************************************/
+
+struct MultiArray11534
+{
+    this(size_t[] sizes...)
+    {
+        storage = new size_t[5];
+    }
+
+    @property auto raw_ptr() inout
+    {
+        return storage.ptr + 1;
+    }
+    size_t[] storage;
+}
+
+enum test11534 = () {
+    auto m = MultiArray11534(3,2,1);
+    auto start = m.raw_ptr;   //this trigger the bug
+    //auto start = m.storage.ptr + 1; //this obviously works
+    return 0;
+}();
+
+/**************************************************
+    11540 - goto label + try-catch-finally / with statement
+**************************************************/
+
+static assert(()
+{
+    // enter to TryCatchStatement.body
+    {
+        bool c = false;
+        try {
+            if (c)  // need to bypass front-end optimization
+                throw new Exception("");
+            else
+            {
+                goto Lx;
+              L1:
+                c = true;
+            }
+        }
+        catch (Exception e) {}
+
+      Lx:
+        if (!c)
+            goto L1;
+    }
+
+    // jump inside TryCatchStatement.body
+    {
+        bool c = false;
+        try
+        {
+            if (c)  // need to bypass front-end optimization
+                throw new Exception("");
+            else
+                goto L2;
+          L2:
+            ;
+        }
+        catch (Exception e) {}
+    }
+
+    // exit from TryCatchStatement.body
+    {
+        bool c = false;
+        try
+        {
+            if (c)  // need to bypass front-end optimization
+                throw new Exception("");
+            else
+                goto L3;
+        }
+        catch (Exception e) {}
+
+        c = true;
+      L3:
+        assert(!c);
+    }
+
+    return 1;
+}());
+
+static assert(()
+{
+    // enter to TryCatchStatement.catches which has no exception variable
+    {
+        bool c = false;
+        goto L1;
+        try
+        {
+            c = true;
+        }
+        catch (Exception/* e*/)
+        {
+          L1:
+            ;
+        }
+        assert(c == false);
+    }
+
+    // jump inside TryCatchStatement.catches
+    {
+        bool c = false;
+        try
+        {
+            throw new Exception("");
+        }
+        catch (Exception e)
+        {
+            goto L2;
+            c = true;
+          L2:
+            ;
+        }
+        assert(c == false);
+    }
+
+    // exit from TryCatchStatement.catches
+    {
+        bool c = false;
+        try
+        {
+            throw new Exception("");
+        }
+        catch (Exception e)
+        {
+            goto L3;
+            c = true;
+        }
+      L3:
+        assert(c == false);
+    }
+
+    return 1;
+}());
+
+static assert(()
+{
+    // enter forward to TryFinallyStatement.body
+    {
+        bool c = false;
+        goto L0;
+        c = true;
+        try
+        {
+          L0:
+            ;
+        }
+        finally {}
+        assert(!c);
+    }
+
+    // enter back to TryFinallyStatement.body
+    {
+        bool c = false;
+        try
+        {
+            goto Lx;
+          L1:
+            c = true;
+        }
+        finally {
+        }
+
+      Lx:
+        if (!c)
+            goto L1;
+    }
+
+    // jump inside TryFinallyStatement.body
+    {
+        try
+        {
+            goto L2;
+          L2: ;
+        }
+        finally {}
+    }
+
+    // exit from TryFinallyStatement.body
+    {
+        bool c = false;
+        try
+        {
+            goto L3;
+        }
+        finally {}
+
+        c = true;
+      L3:
+        assert(!c);
+    }
+
+    // enter in / exit out from finally block is rejected in semantic analysis
+
+    // jump inside TryFinallyStatement.finalbody
+    {
+        bool c = false;
+        try
+        {
+        }
+        finally
+        {
+            goto L4;
+            c = true;
+          L4:
+            assert(c == false);
+        }
+    }
+
+    return 1;
+}());
+
+static assert(()
+{
+    {
+        bool c = false;
+        with (Object.init)
+        {
+            goto L2;
+            c = true;
+          L2:
+            ;
+        }
+        assert(c == false);
+    }
+
+    {
+        bool c = false;
+        with (Object.init)
+        {
+            goto L3;
+            c = true;
+        }
+      L3:
+        assert(c == false);
+    }
+
+    return 1;
+}());
+
+/**************************************************
+    11627 -  cast dchar to char at compile time on AA assignment
+**************************************************/
+
+bool test11627()
+{
+    char[ubyte] toCharTmp;
+    dchar letter = 'A';
+
+    //char c = cast(char)letter;    // OK
+    toCharTmp[0] = cast(char)letter;    // NG
+
+    return true;
+}
+static assert(test11627());
+
+/**************************************************
+    11664 - ignore function local static variables
+**************************************************/
+
+bool test11664()
+{
+    static int x;
+    static int y = 1;
+    return true;
+}
+static assert(test11664());

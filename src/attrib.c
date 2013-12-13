@@ -285,10 +285,10 @@ bool AttribDeclaration::hasStaticCtorOrDtor()
         {
             Dsymbol *s = (*d)[i];
             if (s->hasStaticCtorOrDtor())
-                return TRUE;
+                return true;
         }
     }
-    return FALSE;
+    return false;
 }
 
 const char *AttribDeclaration::kind()
@@ -729,6 +729,12 @@ void ProtDeclaration::semantic(Scope *sc)
     {
         semanticNewSc(sc, sc->stc, sc->linkage, protection, 1, sc->structalign);
     }
+}
+
+void ProtDeclaration::emitComment(Scope *sc)
+{
+    if (protection != PROTprivate)
+        AttribDeclaration::emitComment(sc);
 }
 
 void ProtDeclaration::protectionToCBuffer(OutBuffer *buf, PROT protection)
@@ -1567,7 +1573,8 @@ int CompileDeclaration::addMember(Scope *sc, ScopeDsymbol *sd, int memnum)
 
     this->sd = sd;
     if (memnum == 0)
-    {   /* No members yet, so parse the mixin now
+    {
+        /* No members yet, so parse the mixin now
          */
         compileIt(sc);
         memnum |= AttribDeclaration::addMember(sc, sd, memnum);
@@ -1586,13 +1593,13 @@ void CompileDeclaration::compileIt(Scope *sc)
     exp = exp->ctfeInterpret();
     StringExp *se = exp->toString();
     if (!se)
-    {   exp->error("argument to mixin must be a string, not (%s)", exp->toChars());
+    {
+        exp->error("argument to mixin must be a string, not (%s)", exp->toChars());
     }
     else
     {
         se = se->toUTF8(sc);
-        Parser p(sc->module, (utf8_t *)se->string, se->len, 0);
-        p.scanloc = loc;
+        Parser p(loc, sc->module, (utf8_t *)se->string, se->len, 0);
         p.nextToken();
         unsigned errors = global.errors;
         decl = p.parseDeclDefs(0);
@@ -1612,6 +1619,15 @@ void CompileDeclaration::semantic(Scope *sc)
         compileIt(sc);
         AttribDeclaration::addMember(sc, sd, 0);
         compiled = 1;
+
+        if (scope && decl)
+        {
+            for (size_t i = 0; i < decl->dim; i++)
+            {
+                Dsymbol *s = (*decl)[i];
+                s->setScope(scope);
+            }
+        }
     }
     AttribDeclaration::semantic(sc);
 }

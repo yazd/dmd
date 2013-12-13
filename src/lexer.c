@@ -1,6 +1,6 @@
 
 // Compiler implementation of the D programming language
-// Copyright (c) 1999-2012 by Digital Mars
+// Copyright (c) 1999-2013 by Digital Mars
 // All Rights Reserved
 // written by Walter Bright
 // http://www.digitalmars.com
@@ -93,55 +93,55 @@ const char *Token::toChars()
 {   const char *p;
     static char buffer[3 + 3 * sizeof(float80value) + 1];
 
-    p = buffer;
+    p = &buffer[0];
     switch (value)
     {
         case TOKint32v:
-            sprintf(buffer,"%d",int32value);
+            sprintf(&buffer[0],"%d",int32value);
             break;
 
         case TOKuns32v:
         case TOKcharv:
         case TOKwcharv:
         case TOKdcharv:
-            sprintf(buffer,"%uU",uns32value);
+            sprintf(&buffer[0],"%uU",uns32value);
             break;
 
         case TOKint64v:
-            sprintf(buffer,"%lldL",(longlong)int64value);
+            sprintf(&buffer[0],"%lldL",(longlong)int64value);
             break;
 
         case TOKuns64v:
-            sprintf(buffer,"%lluUL",(ulonglong)uns64value);
+            sprintf(&buffer[0],"%lluUL",(ulonglong)uns64value);
             break;
 
         case TOKfloat32v:
-            ld_sprint(buffer, 'g', float80value);
-            strcat(buffer, "f");
+            ld_sprint(&buffer[0], 'g', float80value);
+            strcat(&buffer[0], "f");
             break;
 
         case TOKfloat64v:
-            ld_sprint(buffer, 'g', float80value);
+            ld_sprint(&buffer[0], 'g', float80value);
             break;
 
         case TOKfloat80v:
-            ld_sprint(buffer, 'g', float80value);
-            strcat(buffer, "L");
+            ld_sprint(&buffer[0], 'g', float80value);
+            strcat(&buffer[0], "L");
             break;
 
         case TOKimaginary32v:
-            ld_sprint(buffer, 'g', float80value);
-            strcat(buffer, "fi");
+            ld_sprint(&buffer[0], 'g', float80value);
+            strcat(&buffer[0], "fi");
             break;
 
         case TOKimaginary64v:
-            ld_sprint(buffer, 'g', float80value);
-            strcat(buffer, "i");
+            ld_sprint(&buffer[0], 'g', float80value);
+            strcat(&buffer[0], "i");
             break;
 
         case TOKimaginary80v:
-            ld_sprint(buffer, 'g', float80value);
-            strcat(buffer, "Li");
+            ld_sprint(&buffer[0], 'g', float80value);
+            strcat(&buffer[0], "Li");
             break;
 
         case TOKstring:
@@ -202,8 +202,8 @@ const char *Token::toChars(TOK value)
 
     p = tochars[value];
     if (!p)
-    {   sprintf(buffer,"TOK%d",value);
-        p = buffer;
+    {   sprintf(&buffer[0],"TOK%d",value);
+        p = &buffer[0];
     }
     return p;
 }
@@ -517,7 +517,6 @@ void Lexer::scan(Token *t)
                 t->value = escapeStringConstant(t,0);
                 return;
 
-#if ! TEXTUAL_ASSEMBLY_OUT
             case '\\':                  // escaped string literal
             {   unsigned c;
                 const utf8_t *pstart = p;
@@ -541,7 +540,7 @@ void Lexer::scan(Token *t)
                             break;
                     }
                 } while (*p == '\\');
-                t->len = stringbuffer.offset;
+                t->len = (unsigned)stringbuffer.offset;
                 stringbuffer.writeByte(0);
                 t->ustring = (utf8_t *)mem.malloc(stringbuffer.offset);
                 memcpy(t->ustring, stringbuffer.data, stringbuffer.offset);
@@ -550,7 +549,6 @@ void Lexer::scan(Token *t)
                 error("Escape String literal %.*s is deprecated, use double quoted string literal \"%.*s\" instead", p - pstart, pstart, p - pstart, pstart);
                 return;
             }
-#endif
 
             case 'a':   case 'b':   case 'c':   case 'd':   case 'e':
             case 'f':   case 'g':   case 'h':   case 'i':   case 'j':
@@ -607,9 +605,9 @@ void Lexer::scan(Token *t)
                         ::time(&ct);
                         char *p = ctime(&ct);
                         assert(p);
-                        sprintf(date, "%.6s %.4s", p + 4, p + 20);
-                        sprintf(time, "%.8s", p + 11);
-                        sprintf(timestamp, "%.24s", p);
+                        sprintf(&date[0], "%.6s %.4s", p + 4, p + 20);
+                        sprintf(&time[0], "%.8s", p + 11);
+                        sprintf(&timestamp[0], "%.24s", p);
                     }
 
                     if (id == Id::DATE)
@@ -633,7 +631,7 @@ void Lexer::scan(Token *t)
                      Lstr:
                         t->value = TOKstring;
                         t->postfix = 0;
-                        t->len = strlen((char *)t->ustring);
+                        t->len = (unsigned)strlen((char *)t->ustring);
                     }
                     else if (id == Id::VERSIONX)
                     {   unsigned major = 0;
@@ -933,12 +931,6 @@ void Lexer::scan(Token *t)
                 {   p++;
                     t->value = TOKminass;
                 }
-#if 0
-                else if (*p == '>')
-                {   p++;
-                    t->value = TOKarrow;
-                }
-#endif
                 else if (*p == '-')
                 {   p++;
                     t->value = TOKminusminus;
@@ -1180,9 +1172,6 @@ void Lexer::scan(Token *t)
 unsigned Lexer::escapeSequence()
 {   unsigned c = *p;
 
-#ifdef TEXTUAL_ASSEMBLY_OUT
-    return c;
-#endif
     int n;
     int ndigits;
 
@@ -1337,7 +1326,7 @@ TOK Lexer::wysiwygStringConstant(Token *t, int tc)
             case '`':
                 if (c == tc)
                 {
-                    t->len = stringbuffer.offset;
+                    t->len = (unsigned)stringbuffer.offset;
                     stringbuffer.writeByte(0);
                     t->ustring = (utf8_t *)mem.malloc(stringbuffer.offset);
                     memcpy(t->ustring, stringbuffer.data, stringbuffer.offset);
@@ -1408,7 +1397,7 @@ TOK Lexer::hexStringConstant(Token *t)
                 {   error("odd number (%d) of hex characters in hex string", n);
                     stringbuffer.writeByte(v);
                 }
-                t->len = stringbuffer.offset;
+                t->len = (unsigned)stringbuffer.offset;
                 stringbuffer.writeByte(0);
                 t->ustring = (utf8_t *)mem.malloc(stringbuffer.offset);
                 memcpy(t->ustring, stringbuffer.data, stringbuffer.offset);
@@ -1588,9 +1577,11 @@ TOK Lexer::delimitedStringConstant(Token *t)
 Ldone:
     if (*p == '"')
         p++;
+    else if (hereid)
+        error("delimited string must end in %s\"", hereid->toChars());
     else
         error("delimited string must end in %c\"", delimright);
-    t->len = stringbuffer.offset;
+    t->len = (unsigned)stringbuffer.offset;
     stringbuffer.writeByte(0);
     t->ustring = (utf8_t *)mem.malloc(stringbuffer.offset);
     memcpy(t->ustring, stringbuffer.data, stringbuffer.offset);
@@ -1644,7 +1635,7 @@ TOK Lexer::tokenStringConstant(Token *t)
     }
 
 Ldone:
-    t->len = p - 1 - pstart;
+    t->len = (unsigned)(p - 1 - pstart);
     t->ustring = (utf8_t *)mem.malloc(t->len + 1);
     memcpy(t->ustring, pstart, t->len);
     t->ustring[t->len] = 0;
@@ -1676,7 +1667,6 @@ TOK Lexer::escapeStringConstant(Token *t, int wide)
         c = *p++;
         switch (c)
         {
-#if !( TEXTUAL_ASSEMBLY_OUT )
             case '\\':
                 switch (*p)
                 {
@@ -1692,7 +1682,6 @@ TOK Lexer::escapeStringConstant(Token *t, int wide)
                         break;
                 }
                 break;
-#endif
             case '\n':
                 scanloc.linnum++;
                 break;
@@ -1705,7 +1694,7 @@ TOK Lexer::escapeStringConstant(Token *t, int wide)
                 break;
 
             case '"':
-                t->len = stringbuffer.offset;
+                t->len = (unsigned)stringbuffer.offset;
                 stringbuffer.writeByte(0);
                 t->ustring = (utf8_t *)mem.malloc(stringbuffer.offset);
                 memcpy(t->ustring, stringbuffer.data, stringbuffer.offset);
@@ -1753,7 +1742,6 @@ TOK Lexer::charConstant(Token *t, int wide)
     c = *p++;
     switch (c)
     {
-#if ! TEXTUAL_ASSEMBLY_OUT
         case '\\':
             switch (*p)
             {
@@ -1773,7 +1761,6 @@ TOK Lexer::charConstant(Token *t, int wide)
                     break;
             }
             break;
-#endif
         case '\n':
         L1:
             scanloc.linnum++;
@@ -1843,237 +1830,180 @@ void Lexer::stringPostfix(Token *t)
 
 TOK Lexer::number(Token *t)
 {
-    // We use a state machine to collect numbers
-    enum STATE { STATE_initial, STATE_0, STATE_decimal, STATE_octal, STATE_octale,
-        STATE_hex, STATE_binary, STATE_hex0, STATE_binary0,
-        STATE_hexh, STATE_error };
-    STATE state;
+    int base = 10;
+    const utf8_t *start = p;
+    unsigned c;
+    uinteger_t n = 0;                       // unsigned >=64 bit integer type
+    int d;
+    bool err = false;
+
+    c = *p;
+    if (c == '0')
+    {
+        ++p;
+        c = *p;
+        switch (c)
+        {
+            case '0': case '1': case '2': case '3':
+            case '4': case '5': case '6': case '7':
+                n = c - '0';
+                ++p;
+                base = 8;
+                break;
+
+            case 'x':
+            case 'X':
+                ++p;
+                base = 16;
+                break;
+
+            case 'b':
+            case 'B':
+                ++p;
+                base = 2;
+                break;
+
+            case '.':
+                if (p[1] == '.' ||                      // if ".."
+                    (isalpha(p[1]) || p[1] == '_' ||    // if ".identifier"
+                      (p[1] & 0x80)                     // if ".unicode"
+                    )
+                   )
+                {
+                    goto Ldone;         // regard . as start of separate token
+                }
+                goto Lreal;
+
+            case 'i':
+            case 'f':
+            case 'F':
+                goto Lreal;
+
+            case '_':
+                ++p;
+                base = 8;
+                break;
+
+            case 'L':
+                if (p[1] == 'i')
+                    goto Lreal;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    while (1)
+    {
+        c = *p;
+        switch (c)
+        {
+            case '0': case '1':
+                ++p;
+                d = c - '0';
+                break;
+
+            case '2': case '3':
+            case '4': case '5': case '6': case '7':
+                if (base == 2 && !err)
+                {
+                    error("binary digit expected");
+                    err = true;
+                }
+                ++p;
+                d = c - '0';
+                break;
+
+            case '8': case '9':
+                ++p;
+                if (base < 10 && !err)
+                {
+                    error("radix %d digit expected", base);
+                    err = true;
+                }
+                d = c - '0';
+                break;
+
+            case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+            case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+                ++p;
+                if (base != 16)
+                {
+                    if (c == 'e' || c == 'E' || c == 'f' || c == 'F')
+                        goto Lreal;
+                    if (!err)
+                    {
+                        error("radix %d digit expected", base);
+                        err = true;
+                    }
+                }
+                if (c >= 'a')
+                    d = c + 10 - 'a';
+                else
+                    d = c + 10 - 'A';
+                break;
+
+            case 'L':
+                if (p[1] == 'i')
+                    goto Lreal;
+                goto Ldone;
+
+            case '.':
+                if (p[1] == '.' ||                      // if ".."
+                    base == 10 &&
+                    (isalpha(p[1]) || p[1] == '_' ||    // if ".identifier"
+                      (p[1] & 0x80)                     // if ".unicode"
+                    )
+                   )
+                {
+                    goto Ldone;         // regard . as start of separate token
+                }
+                goto Lreal;             // otherwise as part of a floating point literal
+
+            case 'p':
+            case 'P':
+            case 'i':
+            Lreal:
+                p = start;
+                return inreal(t);
+
+            case '_':
+                ++p;
+                continue;
+
+            default:
+                goto Ldone;
+        }
+
+        uinteger_t n2 = n * base;
+        if ((n2 / base != n || n2 + d < n) && !err)
+        {
+            error("integer overflow");
+            err = true;
+        }
+        n = n2 + d;
+
+        if (sizeof(n) > 8 &&
+            n > 0xFFFFFFFFFFFFFFFFULL &&    // if n needs more than 64 bits
+            !err)
+        {
+            error("integer overflow");
+            err = true;
+        }
+    }
+
+Ldone:
 
     enum FLAGS
     {
         FLAGS_none     = 0,
         FLAGS_decimal  = 1,             // decimal
         FLAGS_unsigned = 2,             // u or U suffix
-        FLAGS_long     = 4,             // l or L suffix
+        FLAGS_long     = 4,             // L suffix
     };
-    FLAGS flags = FLAGS_decimal;
 
-    unsigned c;
-    const utf8_t *start;
-    TOK result;
-
-    //printf("Lexer::number()\n");
-    state = STATE_initial;
-    stringbuffer.reset();
-    start = p;
-    while (1)
-    {
-        c = *p;
-        switch (state)
-        {
-            case STATE_initial:         // opening state
-                if (c == '0')
-                    state = STATE_0;
-                else
-                    state = STATE_decimal;
-                break;
-
-            case STATE_0:
-                flags = (FLAGS) (flags & ~FLAGS_decimal);
-                switch (c)
-                {
-                    case 'X':
-                    case 'x':
-                        state = STATE_hex0;
-                        break;
-
-                    case '.':
-                        if (p[1] == '.')        // .. is a separate token
-                            goto done;
-                        if (isalpha(p[1]) || p[1] == '_' || (p[1] & 0x80))
-                            goto done;
-                    case 'i':
-                    case 'f':
-                    case 'F':
-                        goto real;
-                    case 'B':
-                    case 'b':
-                        state = STATE_binary0;
-                        break;
-
-                    case '0': case '1': case '2': case '3':
-                    case '4': case '5': case '6': case '7':
-                        state = STATE_octal;
-                        break;
-
-                    case '_':
-                        state = STATE_octal;
-                        p++;
-                        continue;
-
-                    case 'L':
-                        if (p[1] == 'i')
-                            goto real;
-                        goto done;
-
-                    default:
-                        goto done;
-                }
-                break;
-
-            case STATE_decimal:         // reading decimal number
-                if (!isdigit(c))
-                {
-                    if (c == '_')               // ignore embedded _
-                    {   p++;
-                        continue;
-                    }
-                    if (c == '.' && p[1] != '.')
-                    {
-                        if (isalpha(p[1]) || p[1] == '_' || (p[1] & 0x80))
-                            goto done;
-                        goto real;
-                    }
-                    else if (c == 'i' || c == 'f' || c == 'F' ||
-                             c == 'e' || c == 'E')
-                    {
-            real:       // It's a real number. Back up and rescan as a real
-                        p = start;
-                        return inreal(t);
-                    }
-                    else if (c == 'L' && p[1] == 'i')
-                        goto real;
-                    goto done;
-                }
-                break;
-
-            case STATE_hex0:            // reading hex number
-            case STATE_hex:
-                if (!ishex((utf8_t)c))
-                {
-                    if (c == '_')               // ignore embedded _
-                    {   p++;
-                        continue;
-                    }
-                    if (c == '.' && p[1] != '.')
-                        goto real;
-                    if (c == 'P' || c == 'p' || c == 'i')
-                        goto real;
-                    if (state == STATE_hex0)
-                        error("Hex digit expected, not '%c'", c);
-                    goto done;
-                }
-                state = STATE_hex;
-                break;
-
-            case STATE_octal:           // reading octal number
-            case STATE_octale:          // reading octal number with non-octal digits
-                if (!isoctal((utf8_t)c))
-                {
-                    if (c == '_')               // ignore embedded _
-                    {   p++;
-                        continue;
-                    }
-                    if (c == '.' && p[1] != '.')
-                        goto real;
-                    if (c == 'i')
-                        goto real;
-                    if (isdigit(c))
-                    {
-                        state = STATE_octale;
-                    }
-                    else
-                        goto done;
-                }
-                break;
-
-            case STATE_binary0:         // starting binary number
-            case STATE_binary:          // reading binary number
-                if (c != '0' && c != '1')
-                {
-                    if (c == '_')               // ignore embedded _
-                    {   p++;
-                        continue;
-                    }
-                    if (state == STATE_binary0)
-                    {   error("binary digit expected");
-                        state = STATE_error;
-                        break;
-                    }
-                    else
-                        goto done;
-                }
-                state = STATE_binary;
-                break;
-
-            case STATE_error:           // for error recovery
-                if (!isdigit(c))        // scan until non-digit
-                    goto done;
-                break;
-
-            default:
-                assert(0);
-        }
-        stringbuffer.writeByte(c);
-        p++;
-    }
-done:
-    stringbuffer.writeByte(0);          // terminate string
-    if (state == STATE_octale)
-        error("Octal digit expected");
-
-    uinteger_t n;                       // unsigned >=64 bit integer type
-
-    if (stringbuffer.offset == 2 && (state == STATE_decimal || state == STATE_0))
-        n = stringbuffer.data[0] - '0';
-    else
-    {
-        /* Convert string to integer
-         * Not everybody implements strtoull()
-         * and besides, we don't want to deal with errno.
-         */
-        char *p = (char *)stringbuffer.data;
-        int r = 10, d;
-
-        if (*p == '0')
-        {
-            if (p[1] == 'x' || p[1] == 'X')
-                p += 2, r = 16;
-            else if (p[1] == 'b' || p[1] == 'B')
-                p += 2, r = 2;
-            else if (isdigit((utf8_t)p[1]))
-                p += 1, r = 8;
-        }
-
-        n = 0;
-        while (1)
-        {
-            if (*p >= '0' && *p <= '9')
-                d = *p - '0';
-            else if (*p >= 'a' && *p <= 'z')
-                d = *p - 'a' + 10;
-            else if (*p >= 'A' && *p <= 'Z')
-                d = *p - 'A' + 10;
-            else
-                break;
-            if (d >= r)
-                break;
-            uinteger_t n2 = n * r;
-            //printf("n2 / r = %llx, n = %llx\n", n2/r, n);
-            if (n2 / r != n || n2 + d < n)
-            {
-                error ("integer overflow");
-                break;
-            }
-
-            n = n2 + d;
-            p++;
-        }
-
-        if (sizeof(n) > 8 &&
-            n > 0xFFFFFFFFFFFFFFFFULL)  // if n needs more than 64 bits
-            error("integer overflow");
-    }
+    FLAGS flags = (base == 10) ? FLAGS_decimal : FLAGS_none;
 
     // Parse trailing 'u', 'U', 'l' or 'L' in any combination
     const utf8_t *psuffix = p;
@@ -2090,8 +2020,11 @@ done:
                 f = FLAGS_long;
             L1:
                 p++;
-                if (flags & f)
+                if ((flags & f) && !err)
+                {
                     error("unrecognized token");
+                    err = true;
+                }
                 flags = (FLAGS) (flags | f);
                 continue;
             default:
@@ -2100,10 +2033,11 @@ done:
         break;
     }
 
-    if (state == STATE_octal && n >= 8)
+    if (base == 8 && n >= 8)
         deprecation("octal literals 0%llo%.*s are deprecated, use std.conv.octal!%llo%.*s instead",
                 n, p - psuffix, psuffix, n, p - psuffix, psuffix);
 
+    TOK result;
     switch (flags)
     {
         case FLAGS_none:
@@ -2111,26 +2045,31 @@ done:
              * First that fits: int, uint, long, ulong
              */
             if (n & 0x8000000000000000LL)
-                    result = TOKuns64v;
+                result = TOKuns64v;
             else if (n & 0xFFFFFFFF00000000LL)
-                    result = TOKint64v;
+                result = TOKint64v;
             else if (n & 0x80000000)
-                    result = TOKuns32v;
+                result = TOKuns32v;
             else
-                    result = TOKint32v;
+                result = TOKint32v;
             break;
 
         case FLAGS_decimal:
             /* First that fits: int, long, long long
              */
             if (n & 0x8000000000000000LL)
-            {       error("signed integer overflow");
-                    result = TOKuns64v;
+            {
+                if (!err)
+                {
+                    error("signed integer overflow");
+                    err = true;
+                }
+                result = TOKuns64v;
             }
             else if (n & 0xFFFFFFFF80000000LL)
-                    result = TOKint64v;
+                result = TOKint64v;
             else
-                    result = TOKint32v;
+                result = TOKint32v;
             break;
 
         case FLAGS_unsigned:
@@ -2138,25 +2077,30 @@ done:
             /* First that fits: uint, ulong
              */
             if (n & 0xFFFFFFFF00000000LL)
-                    result = TOKuns64v;
+                result = TOKuns64v;
             else
-                    result = TOKuns32v;
+                result = TOKuns32v;
             break;
 
         case FLAGS_decimal | FLAGS_long:
             if (n & 0x8000000000000000LL)
-            {       error("signed integer overflow");
-                    result = TOKuns64v;
+            {
+                if (!err)
+                {
+                    error("signed integer overflow");
+                    err = true;
+                }
+                result = TOKuns64v;
             }
             else
-                    result = TOKint64v;
+                result = TOKint64v;
             break;
 
         case FLAGS_long:
             if (n & 0x8000000000000000LL)
-                    result = TOKuns64v;
+                result = TOKuns64v;
             else
-                    result = TOKint64v;
+                result = TOKint64v;
             break;
 
         case FLAGS_unsigned | FLAGS_long:
@@ -2182,93 +2126,93 @@ done:
  */
 
 TOK Lexer::inreal(Token *t)
-{   int dblstate;
-    unsigned c;
-    char hex;                   // is this a hexadecimal-floating-constant?
-    TOK result;
-
+{
     //printf("Lexer::inreal()\n");
 #ifdef DEBUG
     assert(*p == '.' || isdigit(*p));
 #endif
     stringbuffer.reset();
-    dblstate = 0;
-    hex = 0;
-Lnext:
+    const utf8_t *pstart = p;
+    char hex = 0;
+    unsigned c = *p++;
+
+    // Leading '0x'
+    if (c == '0')
+    {
+        c = *p++;
+        if (c == 'x' || c == 'X')
+        {
+            hex = true;
+            c = *p++;
+        }
+    }
+
+    // Digits to left of '.'
     while (1)
     {
-        // Get next char from input
-        c = *p++;
-        //printf("dblstate = %d, c = '%c'\n", dblstate, c);
-        while (1)
+        if (c == '.')
         {
-            switch (dblstate)
-            {
-                case 0:                 // opening state
-                    if (c == '0')
-                        dblstate = 9;
-                    else if (c == '.')
-                        dblstate = 3;
-                    else
-                        dblstate = 1;
-                    break;
-
-                case 9:
-                    dblstate = 1;
-                    if (c == 'X' || c == 'x')
-                    {   hex++;
-                        break;
-                    }
-                case 1:                 // digits to left of .
-                case 3:                 // digits to right of .
-                case 7:                 // continuing exponent digits
-                    if (!isdigit(c) && !(hex && isxdigit(c)))
-                    {
-                        if (c == '_')
-                            goto Lnext; // ignore embedded '_'
-                        dblstate++;
-                        continue;
-                    }
-                    break;
-
-                case 2:                 // no more digits to left of .
-                    if (c == '.')
-                    {   dblstate++;
-                        break;
-                    }
-                case 4:                 // no more digits to right of .
-                    if ((c == 'E' || c == 'e') ||
-                        hex && (c == 'P' || c == 'p'))
-                    {   dblstate = 5;
-                        hex = 0;        // exponent is always decimal
-                        break;
-                    }
-                    if (hex)
-                        error("binary-exponent-part required");
-                    goto done;
-
-                case 5:                 // looking immediately to right of E
-                    dblstate++;
-                    if (c == '-' || c == '+')
-                        break;
-                case 6:                 // 1st exponent digit expected
-                    if (!isdigit(c))
-                        error("exponent expected");
-                    dblstate++;
-                    break;
-
-                case 8:                 // past end of exponent digits
-                    goto done;
-            }
+            c = *p++;
             break;
         }
-        stringbuffer.writeByte(c);
+        if (isdigit(c) || (hex && isxdigit(c)) || c == '_')
+        {
+            c = *p++;
+            continue;
+        }
+        break;
     }
-done:
-    p--;
+
+    // Digits to right of '.'
+    while (1)
+    {
+        if (isdigit(c) || (hex && isxdigit(c)) || c == '_')
+        {
+            c = *p++;
+            continue;
+        }
+        break;
+    }
+
+    if (c == 'e' || c == 'E' || (hex && (c == 'p' || c == 'P')))
+    {
+        c = *p++;
+        if (c == '-' || c == '+')
+        {
+            c = *p++;
+        }
+        bool anyexp;
+        while (1)
+        {
+            if (isdigit(c) || (hex && isxdigit(c)))
+            {
+                anyexp = true;
+                c = *p++;
+                continue;
+            }
+            if (c == '_')
+            {
+                c = *p++;
+                continue;
+            }
+            if (!anyexp)
+                error("missing exponent");
+            break;
+        }
+    }
+    else if (hex)
+        error("exponent required for hex float");
+    --p;
+    while (pstart < p)
+    {
+        if (*pstart != '_')
+            stringbuffer.writeByte(*pstart);
+        ++pstart;
+    }
 
     stringbuffer.writeByte(0);
 
+    TOK result;
     t->float80value = Port::strtold((char *)stringbuffer.data, NULL);
     errno = 0;
     switch (*p)

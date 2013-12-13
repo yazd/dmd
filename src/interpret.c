@@ -186,7 +186,7 @@ void CtfeStack::push(VarDeclaration *v)
         return;
     }
     savedId.push((void *)(size_t)(v->ctfeAdrOnStack));
-    v->ctfeAdrOnStack = values.dim;
+    v->ctfeAdrOnStack = (int)values.dim;
     vars.push(v);
     values.push(NULL);
 }
@@ -213,7 +213,7 @@ void CtfeStack::popAll(size_t stackpointer)
     for (size_t i = stackpointer; i < values.dim; ++i)
     {
         VarDeclaration *v = vars[i];
-        v->ctfeAdrOnStack = (size_t)(savedId[i]);
+        v->ctfeAdrOnStack = (int)(size_t)(savedId[i]);
     }
     values.setDim(stackpointer);
     vars.setDim(stackpointer);
@@ -227,7 +227,7 @@ void CtfeStack::saveGlobalConstant(VarDeclaration *v, Expression *e)
 #else
      assert( v->init && v->isConst() && !v->isCTFE());
 #endif
-     v->ctfeAdrOnStack = globalValues.dim;
+     v->ctfeAdrOnStack = (int)globalValues.dim;
      globalValues.push(e);
 }
 
@@ -306,7 +306,7 @@ int CompiledCtfeFunction::walkAllVars(Expression *e, void *_this)
         if (global.gag && ccf->func)
             return 1;
 
-        printf("CTFE: ErrorExp in %s\n", ccf->func ? ccf->func->loc.toChars() :  ccf->callingloc.toChars());
+        e->error("CTFE internal error: ErrorExp in %s\n", ccf->func ? ccf->func->loc.toChars() : ccf->callingloc.toChars());
         assert(0);
     }
     if (e->op == TOKdeclaration)
@@ -570,11 +570,7 @@ void TryCatchStatement::ctfeCompile(CompiledCtfeFunction *ccf)
         body->ctfeCompile(ccf);
     for (size_t i = 0; i < catches->dim; i++)
     {
-#if DMDV1
-        Catch *ca = (Catch *)catches->data[i];
-#else
-        Catch *ca = catches->tdata()[i];
-#endif
+        Catch *ca = (*catches)[i];
         if (ca->var)
             ccf->onDeclaration(ca->var);
         if (ca->handler)
@@ -915,7 +911,7 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
                  * Note that v might be v2! So we need to save v2's index
                  * before pushing.
                  */
-                size_t oldadr = v2->ctfeAdrOnStack;
+                int oldadr = v2->ctfeAdrOnStack;
                 ctfeStack.push(v);
                 v->ctfeAdrOnStack = oldadr;
                 assert(v2->hasValue());
@@ -956,6 +952,12 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
 #if LOG
             printf("function body failed to interpret\n");
 #endif
+        }
+
+        if (istatex.start)
+        {
+            error("CTFE internal error: failed to resume at statement %s", istatex.start->toChars());
+            return EXP_CANT_INTERPRET;
         }
 
         /* This is how we deal with a recursive statement AST
@@ -1001,13 +1003,6 @@ Expression *FuncDeclaration::interpret(InterState *istate, Expressions *argument
 
 /******************************** Statement ***************************/
 
-#define START()                         \
-    if (istate->start)                  \
-    {   if (istate->start != this)      \
-            return NULL;                \
-        istate->start = NULL;           \
-    }
-
 /***********************************
  * Interpret the statement.
  * Returns:
@@ -1021,7 +1016,12 @@ Expression *Statement::interpret(InterState *istate)
 #if LOG
     printf("%s Statement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     error("Statement %s cannot be interpreted at compile time", this->toChars());
     return EXP_CANT_INTERPRET;
 }
@@ -1031,7 +1031,12 @@ Expression *ExpStatement::interpret(InterState *istate)
 #if LOG
     printf("%s ExpStatement::interpret(%s)\n", loc.toChars(), exp ? exp->toChars() : "");
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     if (exp)
     {
         Expression *e = exp->interpret(istate, ctfeNeedNothing);
@@ -1140,7 +1145,7 @@ Expression *IfStatement::interpret(InterState *istate)
     {
         if (isTrueBool(e))
             e = ifbody ? ifbody->interpret(istate) : NULL;
-        else if (e->isBool(FALSE))
+        else if (e->isBool(false))
             e = elsebody ? elsebody->interpret(istate) : NULL;
         else
         {
@@ -1285,6 +1290,7 @@ Expression *scrubReturnValue(Loc loc, Expression *e)
             return EXP_CANT_INTERPRET;
         if (!scrubArray(loc, aae->values))
             return EXP_CANT_INTERPRET;
+        aae->type = toBuiltinAAType(aae->type);
     }
     return e;
 }
@@ -1349,7 +1355,12 @@ Expression *ReturnStatement::interpret(InterState *istate)
 #if LOG
     printf("%s ReturnStatement::interpret(%s)\n", loc.toChars(), exp ? exp->toChars() : "");
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     if (!exp)
         return EXP_VOID_INTERPRET;
     assert(istate && istate->fd && istate->fd->type);
@@ -1410,7 +1421,12 @@ Expression *BreakStatement::interpret(InterState *istate)
 #if LOG
     printf("%s BreakStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     if (ident)
     {
         LabelDsymbol *label = istate->fd->searchLabel(ident);
@@ -1440,7 +1456,12 @@ Expression *ContinueStatement::interpret(InterState *istate)
 #if LOG
     printf("%s ContinueStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     if (ident)
     {
         LabelDsymbol *label = istate->fd->searchLabel(ident);
@@ -1513,7 +1534,7 @@ Expression *DoStatement::interpret(InterState *istate)
         if (isTrueBool(e))
         {
         }
-        else if (e->isBool(FALSE))
+        else if (e->isBool(false))
         {   e = NULL;
             break;
         }
@@ -1550,7 +1571,7 @@ Expression *ForStatement::interpret(InterState *istate)
             {   e = EXP_CANT_INTERPRET;
                 break;
             }
-            if (e->isBool(FALSE))
+            if (e->isBool(false))
             {   e = NULL;
                 break;
             }
@@ -1704,7 +1725,12 @@ Expression *GotoStatement::interpret(InterState *istate)
 #if LOG
     printf("%s GotoStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     assert(label && label->statement);
     istate->gotoTarget = label->statement;
     return EXP_GOTO_INTERPRET;
@@ -1715,7 +1741,12 @@ Expression *GotoCaseStatement::interpret(InterState *istate)
 #if LOG
     printf("%s GotoCaseStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     assert(cs);
     istate->gotoTarget = cs;
     return EXP_GOTO_INTERPRET;
@@ -1726,7 +1757,12 @@ Expression *GotoDefaultStatement::interpret(InterState *istate)
 #if LOG
     printf("%s GotoDefaultStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     assert(sw && sw->sdefault);
     istate->gotoTarget = sw->sdefault;
     return EXP_GOTO_INTERPRET;
@@ -1748,7 +1784,22 @@ Expression *TryCatchStatement::interpret(InterState *istate)
 #if LOG
     printf("%s TryCatchStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start == this)
+        istate->start = NULL;
+    if (istate->start)
+    {
+        Expression *e = NULL;
+        if (body)
+            e = body->interpret(istate);
+        for (size_t i = 0; !e && istate->start && i < catches->dim; i++)
+        {
+            Catch *ca = (*catches)[i];
+            if (ca->handler)
+                e = ca->handler->interpret(istate);
+        }
+        return e;
+    }
+
     Expression *e = body ? body->interpret(istate) : NULL;
     if (e == EXP_CANT_INTERPRET)
         return e;
@@ -1760,21 +1811,36 @@ Expression *TryCatchStatement::interpret(InterState *istate)
     // Search for an appropriate catch clause.
     for (size_t i = 0; i < catches->dim; i++)
     {
-#if DMDV1
-        Catch *ca = (Catch *)catches->data[i];
-#else
         Catch *ca = (*catches)[i];
-#endif
         Type *catype = ca->type;
 
         if (catype->equals(extype) || catype->isBaseOf(extype, NULL))
-        {   // Execute the handler
+        {
+            // Execute the handler
             if (ca->var)
             {
                 ctfeStack.push(ca->var);
                 ca->var->setValue(ex->thrown);
             }
-            return ca->handler ? ca->handler->interpret(istate) : NULL;
+            if (ca->handler)
+            {
+                e = ca->handler->interpret(istate);
+                if (e == EXP_GOTO_INTERPRET)
+                {
+                    InterState istatex = *istate;
+                    istatex.start = istate->gotoTarget; // set starting statement
+                    istatex.gotoTarget = NULL;
+                    Expression *eh = ca->handler->interpret(&istatex);
+                    if (!istatex.start)
+                    {
+                        istate->gotoTarget = NULL;
+                        e = eh;
+                    }
+                }
+            }
+            else
+                e = NULL;
+            return e;
         }
     }
     return e;
@@ -1820,7 +1886,18 @@ Expression *TryFinallyStatement::interpret(InterState *istate)
 #if LOG
     printf("%s TryFinallyStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start == this)
+        istate->start = NULL;
+    if (istate->start)
+    {
+        Expression *e = NULL;
+        if (body)
+            e = body->interpret(istate);
+        // Jump into/out from finalbody is disabled in semantic analysis.
+        // and jump inside will be handled by the ScopeStatement == finalbody.
+        return e;
+    }
+
     Expression *e = body ? body->interpret(istate) : NULL;
     if (e == EXP_CANT_INTERPRET)
         return e;
@@ -1842,7 +1919,12 @@ Expression *ThrowStatement::interpret(InterState *istate)
 #if LOG
     printf("%s ThrowStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     Expression *e = exp->interpret(istate);
     if (exceptionOrCantInterpret(e))
         return e;
@@ -1866,7 +1948,12 @@ Expression *WithStatement::interpret(InterState *istate)
     if (exp->op == TOKimport || exp->op == TOKtype)
         return body ? body->interpret(istate) : EXP_VOID_INTERPRET;
 
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     Expression *e = exp->interpret(istate);
     if (exceptionOrCantInterpret(e))
         return e;
@@ -1877,7 +1964,24 @@ Expression *WithStatement::interpret(InterState *istate)
     }
     ctfeStack.push(wthis);
     wthis->setValue(e);
-    e = body ? body->interpret(istate) : EXP_VOID_INTERPRET;
+    if (body)
+    {
+        e = body->interpret(istate);
+        if (e == EXP_GOTO_INTERPRET)
+        {
+            InterState istatex = *istate;
+            istatex.start = istate->gotoTarget; // set starting statement
+            istatex.gotoTarget = NULL;
+            Expression *ex = body->interpret(&istatex);
+            if (!istatex.start)
+            {
+                istate->gotoTarget = NULL;
+                e = ex;
+            }
+        }
+    }
+    else
+        e = EXP_VOID_INTERPRET;
     ctfeStack.pop(wthis);
     return e;
 }
@@ -1887,7 +1991,12 @@ Expression *AsmStatement::interpret(InterState *istate)
 #if LOG
     printf("%s AsmStatement::interpret()\n", loc.toChars());
 #endif
-    START()
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+
     error("asm statements cannot be interpreted at compile time");
     return EXP_CANT_INTERPRET;
 }
@@ -1898,7 +2007,12 @@ Expression *ImportStatement::interpret(InterState *istate)
 #if LOG
     printf("ImportStatement::interpret()\n");
 #endif
-    START();
+    if (istate->start)
+    {   if (istate->start != this)
+            return NULL;
+        istate->start = NULL;
+    }
+;
     return NULL;
 }
 #endif
@@ -2432,11 +2546,11 @@ Expression *DeclarationExp::interpret(InterState *istate, CtfeGoal goal)
         }
         else if (s->isTupleDeclaration() && !v->init)
             e = NULL;
-        else if (v->isStatic() && !v->init)
+        else if (v->isStatic())
             e = NULL;   // Just ignore static variables which aren't read or written yet
         else
         {
-            error("Static variable %s cannot be modified at compile time", v->toChars());
+            error("Variable %s cannot be modified at compile time", v->toChars());
             e = EXP_CANT_INTERPRET;
         }
     }
@@ -2829,9 +2943,7 @@ Expression *NewExp::interpret(InterState *istate, CtfeGoal goal)
             fieldsSoFar -= c->fields.dim;
             for (size_t i = 0; i < c->fields.dim; i++)
             {
-                Dsymbol *s = c->fields[i];
-                VarDeclaration *v = s->isVarDeclaration();
-                assert(v);
+                VarDeclaration *v = c->fields[i];
                 Expression *m;
                 if (v->init)
                 {
@@ -3143,10 +3255,9 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
         {
             desttype = ((TypeArray *)desttype)->next;
 #if DMDV2
-            if (srctype->equals(desttype->castMod(0)))
-#else
-            if (srctype->equals(desttype))
+            desttype = desttype->toBasetype()->castMod(0);
 #endif
+            if (srctype->equals(desttype))
             {
                 isBlockAssignment = true;
                 break;
@@ -3207,8 +3318,8 @@ Expression *BinExp::interpretAssignCommon(InterState *istate, CtfeGoal goal, fp_
     if (op == TOKconstruct && this->e1->op==TOKvar
         && ((VarExp*)this->e1)->var->storage_class & STCref)
     {
-         wantRef = true;
-         wantLvalueRef = true;
+        wantRef = true;
+        wantLvalueRef = true;
     }
 
     if (fp)
@@ -3827,7 +3938,7 @@ bool interpretAssignToIndex(InterState *istate, Loc loc,
      */
     if (aggregate->op == TOKindex || aggregate->op == TOKdotvar ||
         aggregate->op == TOKslice || aggregate->op == TOKcall ||
-        aggregate->op == TOKstar)
+        aggregate->op == TOKstar || aggregate->op == TOKcast)
     {
         aggregate = aggregate->interpret(istate, ctfeNeedLvalue);
         if (exceptionOrCantInterpret(aggregate))
@@ -4030,9 +4141,8 @@ Expression *interpretAssignToSlice(InterState *istate, CtfeGoal goal, Loc loc,
     /* The only possible slicable LValue aggregates are array literals,
      * and slices of array literals.
      */
-
     if (aggregate->op == TOKindex || aggregate->op == TOKdotvar ||
-        aggregate->op == TOKslice ||
+        aggregate->op == TOKslice || aggregate->op == TOKcast ||
         aggregate->op == TOKstar  || aggregate->op == TOKcall)
     {
         aggregate = aggregate->interpret(istate, ctfeNeedLvalue);
@@ -4196,7 +4306,7 @@ Expression *interpretAssignToSlice(InterState *istate, CtfeGoal goal, Loc loc,
         assert( existingAE->type->ty == Tsarray ||
                 existingAE->type->ty == Tarray);
 #if DMDV2
-        Type *desttype = ((TypeArray *)existingAE->type)->next->castMod(0);
+        Type *desttype = ((TypeArray *)existingAE->type)->next->toBasetype()->castMod(0);
         bool directblk = (e2->type->toBasetype()->castMod(0))->equals(desttype);
 #else
         Type *desttype = ((TypeArray *)existingAE->type)->next;
@@ -4376,7 +4486,7 @@ Expression *BinExp::interpretFourPointerRelation(InterState *istate, CtfeGoal go
     if ( !pointToSameMemoryBlock(agg1, agg2)
          && agg1->op != TOKnull && agg2->op != TOKnull)
     {   // Here it is either CANT_INTERPRET,
-        // or an IsInside comparison returning FALSE.
+        // or an IsInside comparison returning false.
         p3 = p3->interpret(istate);
         if (p3 == EXP_CANT_INTERPRET)
             return p3;
@@ -4463,7 +4573,7 @@ Expression *AndAndExp::interpret(InterState *istate, CtfeGoal goal)
     int result;
     if (e != EXP_CANT_INTERPRET)
     {
-        if (e->isBool(FALSE))
+        if (e->isBool(false))
             result = 0;
         else if (isTrueBool(e))
         {
@@ -4475,7 +4585,7 @@ Expression *AndAndExp::interpret(InterState *istate, CtfeGoal goal)
                 assert(type->ty == Tvoid);
                 return NULL;
             }
-            if (e->isBool(FALSE))
+            if (e->isBool(false))
                 result = 0;
             else if (isTrueBool(e))
                 result = 1;
@@ -4516,7 +4626,7 @@ Expression *OrOrExp::interpret(InterState *istate, CtfeGoal goal)
     {
         if (isTrueBool(e))
             result = 1;
-        else if (e->isBool(FALSE))
+        else if (e->isBool(false))
         {
             e = e2->interpret(istate);
             if (exceptionOrCantInterpret(e))
@@ -4529,7 +4639,7 @@ Expression *OrOrExp::interpret(InterState *istate, CtfeGoal goal)
             }
             if (e != EXP_CANT_INTERPRET)
             {
-                if (e->isBool(FALSE))
+                if (e->isBool(false))
                     result = 0;
                 else if (isTrueBool(e))
                     result = 1;
@@ -4788,14 +4898,18 @@ Expression *CallExp::interpret(InterState *istate, CtfeGoal goal)
     }
     eresult = fd->interpret(istate, arguments, pthis);
     if (eresult == EXP_CANT_INTERPRET)
-    {   // Print a stack trace.
+    {
+        // Print a stack trace.
         if (!global.gag)
             showCtfeBackTrace(istate, this, fd);
     }
     else if (eresult == EXP_VOID_INTERPRET)
         ;
     else
+    {
+        eresult->type = type;
         eresult->loc = loc;
+    }
     return eresult;
 }
 
@@ -4888,7 +5002,7 @@ Expression *CondExp::interpret(InterState *istate, CtfeGoal goal)
         return e;
     if (isTrueBool(e))
         e = e1->interpret(istate, goal);
-    else if (e->isBool(FALSE))
+    else if (e->isBool(false))
         e = e2->interpret(istate, goal);
     else
     {
@@ -5528,7 +5642,7 @@ Expression *AssertExp::interpret(InterState *istate, CtfeGoal goal)
     if (isTrueBool(e1))
     {
     }
-    else if (e1->isBool(FALSE))
+    else if (e1->isBool(false))
     {
         if (msg)
         {
@@ -5591,16 +5705,17 @@ Expression *PtrExp::interpret(InterState *istate, CtfeGoal goal)
         }
         e = Ptr(type, e1);
     }
-#if DMDV2
-#else // this is required for D1, where structs return *this instead of 'this'.
-    else if (e1->op == TOKthis)
-    {
-        if (ctfeStack.getThis())
-            return ctfeStack.getThis()->interpret(istate);
-    }
-#endif
     else
     {
+#if DMDV2
+#else // this is required for D1, where structs return *this instead of 'this'.
+        if (e1->op == TOKthis)
+        {
+            if (ctfeStack.getThis())
+                return ctfeStack.getThis()->interpret(istate);
+            goto Ldone;
+        }
+#endif
         // Check for .classinfo, which is lowered in the semantic pass into **(class).
         if (e1->op == TOKstar && e1->type->ty == Tpointer && isTypeInfo_Class(e1->type->nextOf()))
         {
@@ -5738,6 +5853,7 @@ Expression *PtrExp::interpret(InterState *istate, CtfeGoal goal)
         e = paintTypeOntoLiteral(type, e);
     }
 
+Ldone:
 #if LOG
     if (e == EXP_CANT_INTERPRET)
         printf("PtrExp::interpret() %s = EXP_CANT_INTERPRET\n", toChars());
@@ -5975,7 +6091,7 @@ Expression *interpret_aaApply(InterState *istate, Expression *aa, Expression *de
 
     assert(fd && fd->fbody);
     assert(fd->parameters);
-    int numParams = fd->parameters->dim;
+    size_t numParams = fd->parameters->dim;
     assert(numParams == 1 || numParams == 2);
 
     Parameter *valueArg = Parameter::getNth(((TypeFunction *)fd->type)->parameters, numParams - 1);
@@ -6041,7 +6157,7 @@ Expression *foreachApplyUtf(InterState *istate, Expression *str, Expression *del
 
     assert(fd && fd->fbody);
     assert(fd->parameters);
-    int numParams = fd->parameters->dim;
+    size_t numParams = fd->parameters->dim;
     assert(numParams == 1 || numParams==2);
     Type *charType = (*fd->parameters)[numParams-1]->type;
     Type *indexType = numParams == 2 ? (*fd->parameters)[0]->type
@@ -6274,7 +6390,7 @@ Expression *evaluateIfBuiltin(InterState *istate, Loc loc,
     FuncDeclaration *fd, Expressions *arguments, Expression *pthis)
 {
     Expression *e = NULL;
-    int nargs = arguments ? arguments->dim : 0;
+    size_t nargs = arguments ? arguments->dim : 0;
 #if DMDV2
     if (pthis && isAssocArray(pthis->type))
     {
